@@ -127,7 +127,6 @@ bool read_line(char *buf, int n)
 
 void clipboard_set(const char *t) { (void)t; }
 void open_url(const char *u) { printf("[mock] would open %s\n", u); }
-void set_title(const char *t) { (void)t; }
 void u64_to_str(u64 v, char out[24]) { snprintf(out, 24, "%llu", (unsigned long long)v); }
 u64 str_to_u64(const char *s) { return strtoull(s, 0, 10); }
 

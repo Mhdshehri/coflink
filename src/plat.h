@@ -21,11 +21,11 @@ uint16_t udp_local_port(sock_t s);
 void udp_close(sock_t s);
 void wait_socks(const sock_t *s, int n, int ms); /* until one is readable or ms pass */
 
+/* console front end only (Linux test build) */
 int key_poll(void);              /* key pressed, or -1. Never blocks. */
-bool read_line(char *buf, int n);/* blocking line read from the console */
+bool read_line(char *buf, int n);/* blocking line read */
 void clipboard_set(const char *text);
 void open_url(const char *url);
-void set_title(const char *t);
 
 void u64_to_str(u64 v, char out[24]);
 u64 str_to_u64(const char *s);

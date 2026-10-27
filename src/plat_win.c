@@ -12,14 +12,11 @@ typedef uintptr_t SOCKET;
 
 IMP void WINAPI Sleep(DWORD ms);
 IMP u64 WINAPI GetTickCount64(void);
-IMP BOOL WINAPI SetConsoleCtrlHandler(BOOL(WINAPI *h)(DWORD), BOOL add);
 IMP DWORD WINAPI GetModuleFileNameA(HANDLE mod, char *buf, DWORD n);
 IMP BOOL WINAPI SetCurrentDirectoryA(const char *dir);
 IMP HANDLE WINAPI GlobalAlloc(UINT flags, size_t n);
 IMP void *WINAPI GlobalLock(HANDLE h);
 IMP BOOL WINAPI GlobalUnlock(HANDLE h);
-IMP BOOL WINAPI SetConsoleTitleA(const char *t);
-IMP BOOL WINAPI SetConsoleOutputCP(UINT cp);
 IMP void *WINAPI LoadLibraryExA(const char *path, void *file, DWORD flags);
 IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 #define LOAD_LIBRARY_SEARCH_SYSTEM32 0x800
@@ -47,8 +44,6 @@ IMP int WINAPI getsockname(SOCKET s, void *addr, int *len);
 IMP int WINAPI WSAGetLastError(void);
 IMP int WINAPI WSAIoctl(SOCKET s, DWORD code, void *in, DWORD inlen, void *out, DWORD outlen, DWORD *ret, void *ov, void *cb);
 
-int _kbhit(void);
-int _getch(void);
 char *_ui64toa(u64 v, char *buf, int radix);
 u64 _strtoui64(const char *s, char **end, int radix);
 
@@ -67,14 +62,6 @@ static char g_exe_dir[600];
 
 static uint16_t be16(uint16_t v) { return (uint16_t)((v >> 8) | (v << 8)); }
 
-static BOOL WINAPI on_ctrl(DWORD ev)
-{
-    g_quit = 1;
-    if (ev == 2 /* close */ || ev >= 5 /* logoff/shutdown */)
-        Sleep(2000); /* give the main loop time to leave the lobby */
-    return 1;
-}
-
 void plat_init(void)
 {
     static uint8_t wsa[512];
@@ -85,8 +72,6 @@ void plat_init(void)
     void *winmm = LoadLibraryExA("winmm.dll", 0, LOAD_LIBRARY_SEARCH_SYSTEM32);
     UINT(WINAPI * tbp)(UINT) = winmm ? (UINT(WINAPI *)(UINT))GetProcAddress(winmm, "timeBeginPeriod") : 0;
     if (tbp) tbp(1);
-    SetConsoleCtrlHandler(on_ctrl, 1);
-    SetConsoleOutputCP(65001);
     DWORD n = GetModuleFileNameA(0, g_exe_dir, sizeof g_exe_dir - 1);
     g_exe_dir[n] = 0;
     for (int i = (int)n - 1; i >= 0; i--)
@@ -173,16 +158,6 @@ void wait_socks(const sock_t *s, int n, int ms)
     select(0, &r, 0, 0, &t);
 }
 
-int key_poll(void) { return _kbhit() ? _getch() : -1; }
-
-bool read_line(char *buf, int n)
-{
-    if (!fgets(buf, n, stdin)) return false;
-    size_t l = strlen(buf);
-    while (l && (buf[l - 1] == '\n' || buf[l - 1] == '\r')) buf[--l] = 0;
-    return true;
-}
-
 void clipboard_set(const char *text)
 {
     size_t n = strlen(text) + 1;
@@ -198,7 +173,6 @@ void clipboard_set(const char *text)
 }
 
 void open_url(const char *url) { ShellExecuteA(0, "open", url, 0, 0, 1); }
-void set_title(const char *t) { SetConsoleTitleA(t); }
 void u64_to_str(u64 v, char out[24]) { _ui64toa(v, out, 10); }
 u64 str_to_u64(const char *s) { return _strtoui64(s, 0, 10); }
 

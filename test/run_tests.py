@@ -313,6 +313,49 @@ def main():
               "a non-friend joining by id still can't reach the server")
         h4.stop()
 
+        print("[11] one program: stop hosting, switch to joining, invite from the friends list")
+        e = dict(os.environ, **base, MOCK_ID="1041", MOCK_FRIENDS="1042,1043", ASAN_OPTIONS="detect_leaks=0")
+        sw = subprocess.Popen([BIN, "host"], env=e, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True)
+        swlog = []
+        threading.Thread(target=lambda: [swlog.append(l) for l in sw.stdout], daemon=True).start()
+        def swwait(pat, t=8):
+            end = time.time() + t
+            while time.time() < end:
+                if re.search(pat, "".join(swlog)): return True
+                time.sleep(0.05)
+            return False
+        check(swwait(r"Lobby is ready"), "app hosts")
+        lobfile = re.search(r"id (\d+)", "".join(swlog)).group(1)
+        sw.stdin.write("X\n"); sw.stdin.flush()
+        check(swwait(r"Stopped\."), "Stop works")
+        time.sleep(0.3)
+        check(not os.path.exists(os.path.join(d, "lobby_" + lobfile)), "stopping closed the lobby")
+        h5 = Proc("H5", dict(base, MOCK_ID="1042", MOCK_FRIENDS="1041"), ["host"])
+        procs.append(h5)
+        h5.wait_for(r"Lobby is ready")
+        sw.stdin.write("J\n"); sw.stdin.flush()
+        check(swwait(r"Found user1042 hosting"), "same app now joins and finds a host")
+        sw.stdin.write("y\n"); sw.stdin.flush()
+        check(swwait(r"Connected to user1042"), "and connects to them")
+        j6 = Proc("J6", dict(base, MOCK_ID="1043", MOCK_FRIENDS=""), ["join", "--no-launch"])
+        procs.append(j6)
+        j6.wait_for(r"No friend is hosting yet")
+        time.sleep(5.5)  # host publishes its friends-online list every 5 s
+        h5.stop()
+        h7 = subprocess.Popen([BIN, "host"], env=dict(os.environ, **base, MOCK_ID="1044", MOCK_FRIENDS="1043",
+                              ASAN_OPTIONS="detect_leaks=0"), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True)
+        time.sleep(1.5)
+        h7.stdin.write("I\n1\n"); h7.stdin.flush()
+        check(j6.wait_for(r"Accepted invite from user1044") is not None, "invite picked from the friends-online list arrives")
+        check(j6.wait_for(r"Joined user1044's Cry of Fear lobby") is not None, "and the friend joins")
+        for x in (sw, h7):
+            x.send_signal(signal.SIGINT)
+            try: x.wait(5)
+            except subprocess.TimeoutExpired: x.kill()
+        j6.stop()
+
         print("[8] bad internet: 10% of packets lost each way")
         h3 = Proc("H3", dict(base, MOCK_ID="1021", MOCK_FRIENDS="1022", MOCK_LOSS="10"), ["host"])
         j3 = Proc("J3", dict(base, MOCK_ID="1022", MOCK_FRIENDS="1021", MOCK_LOSS="10"), ["join", "--no-launch", "--yes"])

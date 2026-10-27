@@ -10,8 +10,9 @@
  * (playbook/networking-steam-spacewar.md). MIT license. */
 #include "steam.h"
 #include "plat.h"
+#include "ui.h"
 
-#define VERSION "1.1"
+#define VERSION "1.2"
 #define COF_APPID 223710
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 8
@@ -27,12 +28,14 @@
 static void *U, *F, *MM, *NM, *NU;
 static int32_t g_pipe;
 static u64 g_me, g_lobby, g_host, g_joining;
-static bool g_is_host;
+static int g_mode;      /* MODE_IDLE / MODE_HOST / MODE_JOIN */
+static bool g_is_host;  /* g_mode == MODE_HOST */
+static bool g_steam_ok;
 static uint16_t g_game_port = 27015;  /* host: port of the Cry of Fear server */
 static uint16_t g_local_port = 27115; /* join: port the friend's game connects to */
+static uint16_t g_local_port_base = 27115;
 static int g_max_players = 4;
 static bool g_no_launch;
-static bool g_auto_yes; /* --yes: join a found host without asking (tests) */
 static uint8_t g_buf[BUF_SIZE];
 
 /* ---------- output ---------- */
@@ -49,8 +52,7 @@ static void say(const char *fmt, ...)
 #endif
     va_end(ap);
     b[sizeof b - 1] = 0;
-    printf("%s\n", b);
-    fflush(0);
+    ui_log(b);
 }
 
 static const char *idstr(u64 v)
@@ -85,15 +87,6 @@ static const char *who(u64 id)
     return (n && *n && strcmp(n, "[unknown]") != 0) ? clean(n) : idstr(id);
 }
 
-static bool ask_yes(const char *question)
-{
-    if (g_auto_yes) return true;
-    printf("%s (Y/N): ", question);
-    fflush(0);
-    char line[16];
-    if (!read_line(line, sizeof line)) return false;
-    return line[0] == 'y' || line[0] == 'Y';
-}
 
 /* ---------- Steam helpers ---------- */
 
@@ -235,6 +228,13 @@ static void reset_join_state(void)
     g_up = g_down = g_first_up_ms = 0;
 }
 
+static void lobby_gone(void)
+{
+    S.MM_LeaveLobby(MM, g_lobby);
+    reset_join_state();
+    S.Friends_ClearRichPresence(F);
+}
+
 static void request_join(u64 lobby)
 {
     if (g_is_host || !lobby || lobby == g_lobby || lobby == g_joining) return;
@@ -269,6 +269,8 @@ static void launch_game(void)
     clipboard_set(cmd);
     say("");
     say("=== Now start Cry of Fear and connect ===");
+    g_launch_ms = now_ms();
+    g_reminded = false;
     if (!g_no_launch) {
         sfmt(url, sizeof url, "steam://run/%d//-console%%20+connect%%20127.0.0.1:%u/", COF_APPID, (unsigned)g_local_port);
         open_url(url);
@@ -281,7 +283,6 @@ static void launch_game(void)
     say("  2. press Ctrl+V and Enter - this is already on your clipboard:");
     say("       %s", cmd);
     say("");
-    g_launch_ms = now_ms();
 }
 
 static void on_lobby_entered(u64 lobby, uint32_t response)
@@ -318,8 +319,9 @@ static void on_lobby_created(int32_t result, u64 lobby)
 {
     if (!g_is_host || g_lobby) return; /* arrives twice on real Steam */
     if (result != 1) {
-        say("! Steam could not create a lobby (error %d). Check your internet and restart CoFLink.", result);
-        g_quit = 1;
+        say("! Steam could not create a lobby (error %d). Check your internet and try again.", result);
+        g_mode = MODE_IDLE;
+        g_is_host = false;
         return;
     }
     g_lobby = lobby;
@@ -337,46 +339,34 @@ static void on_lobby_created(int32_t result, u64 lobby)
     say("=== Lobby is ready (id %s, copied to clipboard) ===", idstr(lobby));
     say("1. Start Cry of Fear and create your co-op server as usual (Co-op -> Create game).");
     say("   In the console (~) type:  sv_lan 1   (your friends will look like LAN players)");
-    say("2. Tell your friend to run Join-CoF.bat. It finds you on its own.");
-    say("   If it doesn't: press I here to send them a Steam invite, or send them");
-    say("   this lobby id, which they paste after pressing L in their window: %s", idstr(lobby));
-    say("Keys:  I = invite a friend   S = status   Q = quit");
+    say("2. Your friend opens CoFLink and clicks \"Join a friend\" - it finds you on its own.");
+    say("   If it doesn't: invite them (pick them under Friends online -> Invite),");
+    say("   or send them the lobby id above to paste into their CoFLink.");
     say("");
 }
 
-static void invite_menu(void)
+static void publish_friends(void)
 {
-    u64 ids[200];
+    static UiPerson list[200];
     int n = 0, total = S.Friends_GetFriendCount(F, FRIEND_IMMEDIATE);
-    say("Friends online:");
     for (int i = 0; i < total && n < 200; i++) {
         u64 id = S.Friends_GetFriendByIndex(F, i, FRIEND_IMMEDIATE);
         if (S.Friends_GetFriendPersonaState(F, id) == 0) continue; /* offline */
-        ids[n++] = id;
-        say("  %2d. %s", n, who(id));
+        list[n].id = id;
+        list[n].lobby = 0;
+        sfmt(list[n].name, UI_NAME, "%s", who(id));
+        n++;
     }
-    if (!n) { say("  (nobody is online)"); return; }
-    printf("Number to invite (Enter = cancel): ");
-    fflush(0);
-    char line[32];
-    if (!read_line(line, sizeof line) || !line[0]) { say("Cancelled."); return; }
-    int k = atoi(line);
-    if (k < 1 || k > n) { say("No friend with that number."); return; }
-    if (S.MM_InviteUserToLobby(MM, g_lobby, ids[k - 1]))
-        say("Invite sent to %s. They must run Join-CoF.bat, then accept it.", who(ids[k - 1]));
-    else
-        say("! Steam would not send the invite.");
+    ui_list(LIST_FRIENDS_ONLINE, n, list);
 }
 
-static void host_status(void)
+static void invite(u64 id)
 {
-    if (!g_npeers) { say("Status: lobby %s open, no friends connected yet.", idstr(g_lobby)); return; }
-    for (int i = 0; i < g_npeers; i++) {
-        Peer *p = &g_peers[i];
-        say("Status: %s - %s (to your server %s, back %s packets)", who(p->id),
-            p->down ? "playing" : p->up ? "waiting for your server to answer" : "connected, game not started yet",
-            idstr(p->up), idstr(p->down));
-    }
+    if (!g_is_host || !g_lobby) { say("! Start hosting first, then invite."); return; }
+    if (S.MM_InviteUserToLobby(MM, g_lobby, id))
+        say("Invite sent to %s. They open CoFLink, click \"Join a friend\", then accept it.", who(id));
+    else
+        say("! Steam would not send the invite.");
 }
 
 /* ---------- callbacks ---------- */
@@ -405,14 +395,14 @@ static void handle_cb(int cb, uint8_t *p, int size)
                 else say("%s left your lobby.", who(changed));
             } else if (changed == g_host) {
                 say("! %s stopped hosting. Waiting for them to host again...", who(g_host));
-                S.MM_LeaveLobby(MM, g_lobby);
-                reset_join_state();
+                lobby_gone();
             }
         }
         break;
     }
     case CB_GameLobbyJoinRequested:
         if (size >= 16) {
+            if (g_mode != MODE_JOIN) { say("Got a Steam invite - click \"Join a friend\" first, then accept it again."); break; }
             say("Accepted invite from %s.", who(rd64(p + 8)));
             request_join(rd64(p));
         }
@@ -422,12 +412,12 @@ static void handle_cb(int cb, uint8_t *p, int size)
         char conn[257] = { 0 };
         memcpy(conn, p + 8, (size_t)(size - 8 < 256 ? size - 8 : 256));
         const char *c = strstr(conn, "+connect_lobby ");
-        if (c) request_join(str_to_u64(c + 15));
+        if (c && g_mode == MODE_JOIN) request_join(str_to_u64(c + 15));
         break;
     }
     case CB_NetMsgSessionRequest: {
         u64 from = S.Ident_GetSteamID64(p);
-        bool ok = g_is_host ? true /* data is checked against the lobby */ : from == g_host;
+        bool ok = g_is_host ? true /* data is checked against the lobby */ : (g_host && from == g_host);
         if (ok) S.NM_AcceptSessionWithUser(NM, p);
         break;
     }
@@ -480,7 +470,7 @@ static void scan_for_host(bool verbose)
        "+connect_lobby <id>" their CoFLink puts in its Steam rich presence. */
     static u64 noted[32];
     static int nnoted;
-    u64 lobs[32], ids[32];
+    static UiPerson found[32];
     int n = 0, total = S.Friends_GetFriendCount(F, FRIEND_IMMEDIATE);
     for (int i = 0; i < total && n < 32; i++) {
         u64 id = S.Friends_GetFriendByIndex(F, i, FRIEND_IMMEDIATE);
@@ -504,25 +494,21 @@ static void scan_for_host(bool verbose)
             continue;
         }
         if (rejected(lob)) continue;
-        ids[n] = id;
-        lobs[n++] = lob;
+        found[n].id = id;
+        found[n].lobby = lob;
+        sfmt(found[n].name, UI_NAME, "%s", who(id));
+        n++;
     }
-    if (n == 1) {
-        char q[160];
-        sfmt(q, sizeof q, "%s is hosting. Join their game?", who(ids[0]));
-        if (ask_yes(q)) request_join(lobs[0]);
-        else if (g_nrejected < 16) { g_rejected[g_nrejected++] = lobs[0]; say("OK, not joining. Still looking..."); }
-    } else if (n > 1) {
-        say("Several friends are hosting:");
-        for (int i = 0; i < n; i++) say("  %d. %s", i + 1, who(ids[i]));
-        printf("Number to join: ");
-        fflush(0);
-        char line[32];
-        int k = read_line(line, sizeof line) ? atoi(line) : 0;
-        if (k >= 1 && k <= n) request_join(lobs[k - 1]);
-    } else if (verbose) {
+    static int last_n = -1;
+    if (n != last_n && n > 0) say(n == 1 ? "Found %s hosting." : "Found %s friends hosting.", n == 1 ? found[0].name : idstr((u64)n));
+    last_n = n;
+    u64 reject = 0;
+    u64 pick = ui_offer_hosts(n, found, &reject);
+    if (reject && g_nrejected < 16) g_rejected[g_nrejected++] = reject;
+    if (pick) request_join(pick);
+    else if (!n && verbose) {
         say("No friend is hosting yet. Waiting...");
-        say("  Or: accept the host's Steam invite, or press L and paste their lobby id.");
+        say("  Or: accept the host's Steam invite, or paste their lobby id.");
     }
 }
 
@@ -588,8 +574,7 @@ static void drain_steam(void)
                     say("Connected to %s through Steam.", who(g_host));
                 } else if (c == 'B') {
                     say("! %s closed CoFLink.", who(g_host));
-                    S.MM_LeaveLobby(MM, g_lobby);
-                    reset_join_state();
+                    lobby_gone();
                 }
             }
         }
@@ -613,7 +598,7 @@ static void host_tick(void)
         if (p->up && !p->down && !p->warned_silent_server && t - p->first_up_ms > 8000) {
             p->warned_silent_server = true;
             say("! %s is trying to join, but nothing answers on 127.0.0.1:%u.", who(p->id), (unsigned)g_game_port);
-            say("  Start the co-op server in Cry of Fear first. If you use another port, run: CoFLink host --port <port>");
+            say("  Start the co-op game in Cry of Fear first (and type sv_lan 1 in its console).");
         }
         if (t - p->last_heard > PEER_TIMEOUT_MS) { drop_peer(p->id, "timed out"); i--; }
     }
@@ -663,54 +648,192 @@ static void join_tick(void)
     }
 }
 
-static void relay_loop(void)
+/* ---------- modes ---------- */
+
+static bool steam_start(void);
+
+static void reset_all(void)
 {
-    u64 last_scan = 0;
+    for (int i = 0; i < g_npeers; i++) udp_close(g_peers[i].s);
+    g_npeers = 0;
+    g_nignored = 0;
+    udp_close(g_game_sock);
+    g_game_sock = BADSOCK;
+    g_have_game = false;
+    g_game_cport = 0;
+    g_joining = 0;
+    g_launch_ms = 0;
+    g_reminded = false;
+    g_nrejected = 0;
+    g_local_port = g_local_port_base;
+    reset_join_state();
+}
+
+static void stop_mode(bool quiet)
+{
+    if (g_mode == MODE_IDLE) return;
+    if (g_is_host) {
+        for (int i = 0; i < g_npeers; i++) send_ctl(g_peers[i].id, 'B');
+    } else if (g_host) {
+        send_ctl(g_host, 'B');
+    }
+    for (int i = 0; i < 20; i++) { S.MD_RunFrame(g_pipe); sleep_ms(10); } /* flush goodbyes */
+    if (g_lobby) S.MM_LeaveLobby(MM, g_lobby);
+    if (g_joining) S.MM_LeaveLobby(MM, g_joining);
+    S.Friends_ClearRichPresence(F);
+    reset_all();
+    g_mode = MODE_IDLE;
+    g_is_host = false;
+    ui_list(LIST_FRIENDS_ONLINE, 0, 0);
+    ui_list(LIST_HOSTING, 0, 0);
+    if (!quiet) say("Stopped.");
+}
+
+static void start_mode(int mode)
+{
+    if (g_mode == mode) return;
+    stop_mode(true);
+    if (!g_steam_ok && !(g_steam_ok = steam_start())) return;
+    g_mode = mode;
+    g_is_host = mode == MODE_HOST;
+    say("");
+    if (g_is_host) {
+        say("Creating a friends-only lobby for %d players...", g_max_players);
+        S.MM_CreateLobby(MM, LOBBY_FRIENDS_ONLY, g_max_players);
+    } else {
+        say("Looking for a friend who is hosting...");
+    }
+}
+
+static void make_status(UiState *st)
+{
+    memset(st, 0, sizeof *st);
+    st->mode = g_mode;
+    st->steam_ok = g_steam_ok;
+    st->lobby = g_lobby;
+    st->local_port = g_local_port;
+    st->friends_connected = g_npeers;
+    if (g_mode == MODE_IDLE) {
+        sfmt(st->status, sizeof st->status, g_steam_ok ? "Ready. Host a game, or join a friend." :
+             "Choose Host a game or Join a friend.");
+    } else if (g_is_host) {
+        int playing = 0;
+        for (int i = 0; i < g_npeers; i++) playing += g_peers[i].down > 0;
+        if (!g_lobby) sfmt(st->status, sizeof st->status, "Creating lobby...");
+        else if (!g_npeers) sfmt(st->status, sizeof st->status, "Hosting - waiting for friends to join");
+        else sfmt(st->status, sizeof st->status, "Hosting - %d friend(s) connected, %d in game", g_npeers, playing);
+    } else {
+        if (g_joining) sfmt(st->status, sizeof st->status, "Joining lobby...");
+        else if (!g_lobby) sfmt(st->status, sizeof st->status, "Looking for a friend who is hosting...");
+        else if (g_down) sfmt(st->status, sizeof st->status, "Playing with %s", who(g_host));
+        else if (g_welcomed) sfmt(st->status, sizeof st->status, "Connected to %s - start Cry of Fear and connect", who(g_host));
+        else sfmt(st->status, sizeof st->status, "Reaching %s through Steam...", who(g_host));
+    }
+}
+
+static void print_status(void)
+{
+    if (g_is_host) {
+        if (!g_npeers) { say("Status: lobby %s open, no friends connected yet.", idstr(g_lobby)); return; }
+        for (int i = 0; i < g_npeers; i++) {
+            Peer *p = &g_peers[i];
+            say("Status: %s - %s (to your server %s, back %s packets)", who(p->id),
+                p->down ? "playing" : p->up ? "waiting for your server to answer" : "connected, game not started yet",
+                idstr(p->up), idstr(p->down));
+        }
+    } else if (g_mode == MODE_JOIN) {
+        say("Status: %s, game packets sent %s, received %s.",
+            g_lobby ? (g_welcomed ? "connected to host" : "waiting for host") : "looking for a host",
+            idstr(g_up), idstr(g_down));
+    } else {
+        say("Status: idle.");
+    }
+}
+
+static void handle_cmd(const Cmd *c)
+{
+    switch (c->kind) {
+    case CMD_HOST: start_mode(MODE_HOST); break;
+    case CMD_JOIN: start_mode(MODE_JOIN); break;
+    case CMD_JOIN_LOBBY:
+        if (!c->arg) { say("! That isn't a lobby id."); break; }
+        if (g_mode != MODE_JOIN) start_mode(MODE_JOIN);
+        if (g_mode == MODE_JOIN) { g_joining = 0; request_join(c->arg); }
+        break;
+    case CMD_INVITE: invite(c->arg); break;
+    case CMD_LAUNCH:
+        if (g_mode == MODE_JOIN && g_lobby && open_game_socket()) launch_game();
+        else if (g_mode == MODE_HOST) { open_url("steam://run/223710"); say("Starting Cry of Fear..."); }
+        else say("! Join a friend's lobby first.");
+        break;
+    case CMD_STATUS: print_status(); break;
+    case CMD_STOP: stop_mode(false); break;
+    case CMD_QUIT: g_quit = 1; break;
+    default: break;
+    }
+}
+
+void engine_run(const EngineOpts *o, Cmd first)
+{
+    g_game_port = o->game_port ? o->game_port : 27015;
+    g_local_port = g_local_port_base = o->local_port ? o->local_port : 27115;
+    g_max_players = o->max_players >= 2 && o->max_players <= 8 ? o->max_players : 4;
+    g_no_launch = o->no_launch;
+    say("CoFLink " VERSION " - Cry of Fear co-op over Steam (no VPN, no port forwarding)");
+    if (first.kind != CMD_NONE) handle_cmd(&first);
+
+    u64 last_scan = 0, last_friends = 0, last_state = 0;
+    UiState prev;
+    memset(&prev, 0xff, sizeof prev);
+    int prev_mode = -1;
     while (!g_quit) {
-        pump_callbacks();
-        drain_steam();
-        if (g_is_host) {
+        if (g_steam_ok) {
+            pump_callbacks();
+            drain_steam();
+        }
+        u64 t = now_ms();
+        if (g_mode != prev_mode) { last_scan = 0; last_friends = 0; prev_mode = g_mode; }
+        if (g_mode == MODE_HOST) {
             host_tick();
-        } else {
+            if (g_lobby && (!last_friends || t - last_friends > 5000)) { publish_friends(); last_friends = t; }
+        } else if (g_mode == MODE_JOIN) {
             join_tick();
-            if (!g_lobby && !g_joining && now_ms() - last_scan > 3000) {
+            if (!g_lobby && !g_joining && (!last_scan || t - last_scan > 3000)) {
                 scan_for_host(last_scan == 0);
                 last_scan = now_ms();
             }
         }
-        int key = key_poll();
-        if (key == 'q' || key == 'Q') g_quit = 1;
-        if (g_is_host && g_lobby && (key == 'i' || key == 'I')) invite_menu();
-        if (g_is_host && (key == 's' || key == 'S')) host_status();
-        if (!g_is_host && !g_lobby && (key == 'l' || key == 'L')) {
-            printf("Paste the host's lobby id (right-click or Ctrl+V), then Enter: ");
-            fflush(0);
-            char line[64];
-            u64 id = read_line(line, sizeof line) ? str_to_u64(line) : 0;
-            if (id) { g_joining = 0; request_join(id); }
-            else say("That isn't a lobby id. Press L to try again.");
+        Cmd c;
+        while (ui_poll(&c)) handle_cmd(&c);
+
+        if (t - last_state > 200) {
+            UiState st;
+            make_status(&st);
+            if (memcmp(&st, &prev, sizeof st) != 0) { ui_state(&st); prev = st; }
+            last_state = t;
         }
-        if (!g_is_host && (key == 's' || key == 'S'))
-            say("Status: %s, game packets sent %s, received %s.",
-                g_lobby ? (g_welcomed ? "connected to host" : "waiting for host") : "looking for a host",
-                idstr(g_up), idstr(g_down));
 
         sock_t socks[MAX_PEERS + 1];
         int ns = 0;
-        if (g_is_host) for (int i = 0; i < g_npeers; i++) socks[ns++] = g_peers[i].s;
-        else socks[ns++] = g_game_sock;
-        wait_socks(socks, ns, 1);
+        if (g_mode == MODE_HOST) for (int i = 0; i < g_npeers; i++) socks[ns++] = g_peers[i].s;
+        else if (g_mode == MODE_JOIN) socks[ns++] = g_game_sock;
+        wait_socks(socks, ns, g_mode == MODE_IDLE ? 20 : 1);
     }
+    if (g_steam_ok) {
+        stop_mode(true);
+        S.Shutdown();
+    }
+    say("CoFLink closed.");
 }
 
-/* ---------- start-up and shut-down ---------- */
+/* ---------- start-up ---------- */
 
 static bool steam_start(void)
 {
     file_write_text("steam_appid.txt", "480");
     const char *e = steam_load();
     if (e) { say("! %s", e); return false; }
-    if (!S.IsSteamRunning()) { say("! Steam is not running. Start Steam, log in, then run this again."); return false; }
+    if (!S.IsSteamRunning()) { say("! Steam is not running. Start Steam, log in, then try again."); return false; }
     char err[1024] = { 0 };
     int r = S.InitFlat(err);
     if (r != 0) {
@@ -726,84 +849,9 @@ static bool steam_start(void)
     NM = S.SteamNetMsgs();
     NU = S.SteamNetUtils();
     if (!U || !F || !MM || !NM || !NU) { say("! Steam interfaces unavailable."); return false; }
-    if (!S.User_BLoggedOn(U)) { say("! Steam is in offline mode. Go online and try again."); return false; }
+    if (!S.User_BLoggedOn(U)) { say("! Steam is in offline mode. Go online and try again."); S.Shutdown(); return false; }
     g_me = S.User_GetSteamID(U);
     S.NU_InitRelayNetworkAccess(NU);
-    say("Signed in to Steam as %s.", S.Friends_GetPersonaName(F));
+    say("Signed in to Steam as %s.", who(g_me));
     return true;
-}
-
-static void shutdown_all(void)
-{
-    if (g_is_host) {
-        for (int i = 0; i < g_npeers; i++) send_ctl(g_peers[i].id, 'B');
-    } else if (g_host) {
-        send_ctl(g_host, 'B');
-    }
-    for (int i = 0; i < 20; i++) { S.MD_RunFrame(g_pipe); sleep_ms(10); } /* flush goodbyes */
-    if (g_lobby) S.MM_LeaveLobby(MM, g_lobby);
-    S.Friends_ClearRichPresence(F);
-    for (int i = 0; i < g_npeers; i++) udp_close(g_peers[i].s);
-    udp_close(g_game_sock);
-    S.Shutdown();
-    say("CoFLink closed.");
-}
-
-static void usage(void)
-{
-    say("CoFLink " VERSION " - Cry of Fear co-op over Steam (no VPN, no port forwarding)");
-    say("  CoFLink host [--port 27015] [--players 4]   host a game for your friends");
-    say("  CoFLink join [lobby id] [--port 27115] [--no-launch]   join a friend");
-}
-
-int main(int argc, char **argv)
-{
-    plat_init();
-    int mode = 0; /* 1 host, 2 join */
-    u64 join_lobby = 0;
-    for (int i = 1; i < argc; i++) {
-        const char *a = argv[i];
-        if (!strcmp(a, "host")) mode = 1;
-        else if (!strcmp(a, "join")) mode = 2;
-        else if (!strcmp(a, "--port") && i + 1 < argc) {
-            int p = atoi(argv[++i]);
-            if (p > 0 && p < 65536) { g_game_port = (uint16_t)p; g_local_port = (uint16_t)p; }
-        } else if (!strcmp(a, "--players") && i + 1 < argc) {
-            g_max_players = atoi(argv[++i]);
-            if (g_max_players < 2 || g_max_players > 8) g_max_players = 4;
-        } else if (!strcmp(a, "--no-launch")) g_no_launch = true;
-        else if (!strcmp(a, "--yes")) g_auto_yes = true;
-        else if (!strcmp(a, "+connect_lobby") && i + 1 < argc) { mode = 2; join_lobby = str_to_u64(argv[++i]); }
-        else if (a[0] >= '0' && a[0] <= '9') join_lobby = str_to_u64(a);
-        else if (!strcmp(a, "-h") || !strcmp(a, "--help") || !strcmp(a, "/?")) { usage(); return 0; }
-    }
-    /* --port means the server port when hosting and the local port when joining */
-    if (mode == 1) g_local_port = 27115;
-    if (mode == 2 && g_game_port != 27015) g_local_port = g_game_port;
-
-    if (!mode) {
-        usage();
-        printf("\n1 = host a game, 2 = join a friend: ");
-        fflush(0);
-        char line[16];
-        if (!read_line(line, sizeof line)) return 1;
-        mode = line[0] == '1' ? 1 : line[0] == '2' ? 2 : 0;
-        if (!mode) return 1;
-    }
-    g_is_host = mode == 1;
-    set_title(g_is_host ? "CoFLink - hosting Cry of Fear co-op" : "CoFLink - joining Cry of Fear co-op");
-    say("CoFLink " VERSION " (%s)", g_is_host ? "host" : "join");
-    if (!steam_start()) return 1;
-
-    if (g_is_host) {
-        say("Creating a friends-only lobby for %d players...", g_max_players);
-        S.MM_CreateLobby(MM, LOBBY_FRIENDS_ONLY, g_max_players);
-    } else if (join_lobby) {
-        request_join(join_lobby);
-    } else {
-        say("Looking for a friend who is hosting...");
-    }
-    relay_loop();
-    shutdown_all();
-    return 0;
 }
