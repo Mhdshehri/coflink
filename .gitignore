@@ -1,0 +1,7 @@
+build/
+dist/
+*.o
+*.exe
+*.dll
+steam_appid.txt
+__pycache__/
