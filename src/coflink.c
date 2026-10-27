@@ -12,7 +12,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "1.2"
+#define VERSION "0.2"
 #define COF_APPID 223710
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 8

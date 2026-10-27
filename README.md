@@ -4,7 +4,7 @@ Play **Cry of Fear** co-op with a Steam friend: no VPN (no Hamachi or Radmin), n
 
 The host runs the game's own co-op server on their PC. CoFLink carries the game traffic through Steam's relay network, so your friend joins from Steam.
 
-**Download:** grab `CoFLink-1.2.zip` from [Releases](../../releases). Both players unzip it and open `CoFLink.exe`.
+**Download:** grab `CoFLink-0.2.zip` from [Releases](../../releases). Both players unzip it and open `CoFLink.exe`. (Beta: the connection has been played in a real two-player session; the window is new.)
 
 ## How to play
 

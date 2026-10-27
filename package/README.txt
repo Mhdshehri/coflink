@@ -1,4 +1,4 @@
-CoFLink 1.2 - Cry of Fear co-op with a Steam friend
+CoFLink 0.2 (beta) - Cry of Fear co-op with a Steam friend
 =====================================================
 No VPN (no Hamachi/Radmin), no port forwarding, no IP addresses.
 One program for both players: open CoFLink.exe and click a button.
