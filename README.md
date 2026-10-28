@@ -30,7 +30,7 @@ Friend's Cry of Fear --UDP--> CoFLink (127.0.0.1:27115)
 Host's CoFLink --UDP--> Host's Cry of Fear server (127.0.0.1:27015)
 ```
 
-- Lobbies, invites and the relay come from Valve's free "Spacewar" test app (AppID 480), which every Steam user can run. While CoFLink is open, Steam shows you as "playing Spacewar".
+- Lobbies and the relay come from Valve's free "Spacewar" test app (AppID 480), which every Steam user can run. While CoFLink is open, Steam shows you as "playing Spacewar".
 - The game is never modified. Nothing is injected, and no game files are changed.
 - The game's own netcode keeps players in sync. CoFLink forwards its packets unchanged and in order, adding about 1–2 ms.
 
