@@ -17,6 +17,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <sys/file.h>
 
 SteamApi S;
 
@@ -65,6 +66,19 @@ static void push_result(int id, const void *p, int size, u64 call)
 typedef struct { u64 owner; u64 mem[16]; int nmem; char k[8][32], v[8][64]; int nd; bool exists; } Lobby;
 
 static void lobby_path(u64 l, char *out) { snprintf(out, 600, "%s/lobby_%llu", dir, (unsigned long long)l); }
+
+/* Lobby files are shared by several test processes: every read-modify-write
+   of one happens under a lock, as it would on Steam's servers. */
+static int lock_fd = -1;
+static void lobby_lock(void)
+{
+    if (lock_fd < 0) {
+        char p[600]; snprintf(p, sizeof p, "%s/lobby.lock", dir);
+        lock_fd = open(p, O_CREAT | O_RDWR, 0600);
+    }
+    if (lock_fd >= 0) flock(lock_fd, LOCK_EX);
+}
+static void lobby_unlock(void) { if (lock_fd >= 0) flock(lock_fd, LOCK_UN); }
 
 static Lobby lobby_read(u64 l)
 {
@@ -298,7 +312,7 @@ static const char *m_GetFriendRichPresence(void *s, u64 id, const char *k)
     (void)s;
     static char v[256];
     v[0] = 0;
-    if (strcmp(k, "connect") != 0) return v;
+    if (strcmp(k, "connect") != 0 || getenv("MOCK_HIDE_RP")) return v;
     char p[600]; snprintf(p, sizeof p, "%s/rp_%llu", dir, (unsigned long long)id);
     FILE *f = fopen(p, "r");
     if (f) { if (!fgets(v, sizeof v, f)) v[0] = 0; fclose(f); }
@@ -318,7 +332,9 @@ static u64 m_CreateLobby(void *s, int type, int max)
     u64 l = 109775240000000000ULL + me * 10 + (u64)(rand() % 10);
     Lobby L = { 0 };
     L.owner = me; L.mem[L.nmem++] = me; L.exists = true;
+    lobby_lock();
     lobby_write(l, &L);
+    lobby_unlock();
     my_lobby = l; last_seen = L;
     playing_write(l);
     u64 call = next_call++;
@@ -335,6 +351,7 @@ static u64 m_JoinLobby(void *s, u64 l)
 {
     (void)s;
     u64 call = next_call++;
+    lobby_lock();
     Lobby L = lobby_read(l);
     uint32_t resp = 2;
     if (L.exists && L.nmem < 16) {
@@ -344,6 +361,7 @@ static u64 m_JoinLobby(void *s, u64 l)
         playing_write(l);
         resp = 1;
     }
+    lobby_unlock();
     uint8_t e[24] = { 0 };
     memcpy(e, &l, 8); memcpy(e + 16, &resp, 4);
     push_result(504, e, 24, call);
@@ -352,6 +370,7 @@ static u64 m_JoinLobby(void *s, u64 l)
 static void m_LeaveLobby(void *s, u64 l)
 {
     (void)s;
+    lobby_lock();
     Lobby L = lobby_read(l);
     if (L.exists) {
         if (L.owner == me) { char p[600]; lobby_path(l, p); unlink(p); }
@@ -360,19 +379,22 @@ static void m_LeaveLobby(void *s, u64 l)
             lobby_write(l, &L);
         }
     }
+    lobby_unlock();
     if (my_lobby == l) { my_lobby = 0; memset(&last_seen, 0, sizeof last_seen); }
     playing_write(0);
 }
 static bool m_SetLobbyData(void *s, u64 l, const char *k, const char *v)
 {
     (void)s;
+    lobby_lock();
     Lobby L = lobby_read(l);
-    if (!L.exists || L.nd >= 8) return false;
+    if (!L.exists || L.nd >= 8) { lobby_unlock(); return false; }
     snprintf(L.k[L.nd], 32, "%s", k);
     snprintf(L.v[L.nd], 64, "%s", *v ? v : "-");
     for (char *c = L.v[L.nd]; *c; c++) if (*c == ' ') *c = '_';
     L.nd++;
     lobby_write(l, &L);
+    lobby_unlock();
     return true;
 }
 static const char *m_GetLobbyData(void *s, u64 l, const char *k)

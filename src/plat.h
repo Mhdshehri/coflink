@@ -25,6 +25,7 @@ void wait_socks(const sock_t *s, int n, int ms); /* until one is readable or ms 
 int key_poll(void);              /* key pressed, or -1. Never blocks. */
 bool read_line(char *buf, int n);/* blocking line read */
 void clipboard_set(const char *text);
+bool process_running(const char *exe_name); /* e.g. "cof.exe", case-insensitive */
 void open_url(const char *url);
 
 void u64_to_str(u64 v, char out[24]);

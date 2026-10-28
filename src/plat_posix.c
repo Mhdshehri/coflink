@@ -126,6 +126,8 @@ bool read_line(char *buf, int n)
 }
 
 void clipboard_set(const char *t) { (void)t; }
+/* tests: the mock "game" counts as running when MOCK_COF=1 */
+bool process_running(const char *n) { (void)n; const char *e = getenv("MOCK_COF"); return e && *e == '1'; }
 void open_url(const char *u) { printf("[mock] would open %s\n", u); }
 void u64_to_str(u64 v, char out[24]) { snprintf(out, 24, "%llu", (unsigned long long)v); }
 u64 str_to_u64(const char *s) { return strtoull(s, 0, 10); }

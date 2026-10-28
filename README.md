@@ -4,7 +4,7 @@ Play **Cry of Fear** co-op with a Steam friend: no VPN (no Hamachi or Radmin), n
 
 The host runs the game's own co-op server on their PC. CoFLink carries the game traffic through Steam's relay network, so your friend joins from Steam.
 
-**Download:** grab `CoFLink-0.2.zip` from [Releases](../../releases). Both players unzip it and open `CoFLink.exe`. (Beta: the connection has been played in a real two-player session; the window is new.)
+**Download:** grab `CoFLink-0.3.zip` from [Releases](../../releases). Both players unzip it and open `CoFLink.exe`. (Beta: the connection has been played in a real two-player session; the window is new.)
 
 ## How to play
 
@@ -16,10 +16,11 @@ CoFLink is one program with a simple window for both players.
 3. Keep CoFLink open while you play. To bring a friend in directly, pick them under *Friends online* and click **Invite**.
 
 **Friend**
-1. Click **Join a friend**, pick the host under *Friends hosting*, and click **Join**.
-   If they don't appear, paste the host's lobby id (the host clicks **Copy id**) and click **Join this id**.
-2. Cry of Fear starts. If you land in the main menu, press `~`, then `Ctrl+V` and Enter
-   (`connect 127.0.0.1:27115` is already on your clipboard).
+1. Accept the host's Steam invite, or click **Join a friend** and pick the host
+   (or paste the host's lobby id and click **Join this id**).
+2. Start Cry of Fear as usual. CoFLink checks that the host's co-op game answers, waits for
+   your game's menu to load, then connects it for you (`steam://connect`), retrying if needed.
+   Fallback: **Connect game**, or `~` then `Ctrl+V` and Enter.
 
 See [package/README.txt](package/README.txt) for the full guide, troubleshooting and low-FPS tips.
 
@@ -68,7 +69,7 @@ python3 test/run_tests.py   # prints ALL OK
 
 The engine (`src/coflink.c`) is shared by the window (`src/ui_win.c`) and a text front end (`src/ui_console.c`) that the tests drive.
 
-The tests cover: two friends playing through the relay; packets arriving exact and in order; level-load bursts; latency; strangers being blocked; quit and reconnect; invites; foreign lobbies being refused; join confirmation; discovery through rich presence; joining by lobby id; stopping, then switching between hosting and joining; inviting from the friends list; and 10% packet loss.
+The tests cover: two friends playing through the relay; packets arriving exact and in order; level-load bursts; latency; strangers being blocked; quit and reconnect; invites; foreign lobbies being refused; join confirmation; discovery through rich presence and by asking a friend's CoFLink directly (host opened first); joining by lobby id; automatic game connect (waits for the host's server and the friend's game); invites accepted from the start screen; the game and Steam's server query sharing the relay; version checks; stopping, then switching between hosting and joining; inviting from the friends list; and 10% packet loss.
 
 ## Credits
 

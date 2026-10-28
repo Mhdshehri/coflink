@@ -20,6 +20,10 @@ IMP BOOL WINAPI GlobalUnlock(HANDLE h);
 IMP void *WINAPI LoadLibraryExA(const char *path, void *file, DWORD flags);
 IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 #define LOAD_LIBRARY_SEARCH_SYSTEM32 0x800
+IMP HANDLE WINAPI CreateToolhelp32Snapshot(DWORD flags, DWORD pid);
+IMP BOOL WINAPI Process32First(HANDLE snap, void *entry);
+IMP BOOL WINAPI Process32Next(HANDLE snap, void *entry);
+IMP BOOL WINAPI CloseHandle(HANDLE h);
 IMP BOOL WINAPI OpenClipboard(HANDLE w);
 IMP BOOL WINAPI EmptyClipboard(void);
 IMP HANDLE WINAPI SetClipboardData(UINT fmt, HANDLE h);
@@ -170,6 +174,28 @@ void clipboard_set(const char *text)
         SetClipboardData(1 /* CF_TEXT */, h);
         CloseClipboard();
     }
+}
+
+/* PROCESSENTRY32 (ANSI, 32-bit): 9 fields of 4 bytes, then the exe name */
+typedef struct { DWORD size, usage, pid; uintptr_t heap; DWORD module, threads, parent; long prio; DWORD flags; char exe[260]; } ProcEntry;
+
+static char lower(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
+
+bool process_running(const char *exe_name)
+{
+    HANDLE snap = CreateToolhelp32Snapshot(2 /* TH32CS_SNAPPROCESS */, 0);
+    if (snap == (HANDLE)(intptr_t)-1) return false;
+    ProcEntry e;
+    memset(&e, 0, sizeof e);
+    e.size = sizeof e;
+    bool found = false;
+    for (BOOL ok = Process32First(snap, &e); ok && !found; ok = Process32Next(snap, &e)) {
+        int i = 0;
+        while (e.exe[i] && exe_name[i] && lower(e.exe[i]) == lower(exe_name[i])) i++;
+        found = !e.exe[i] && !exe_name[i];
+    }
+    CloseHandle(snap);
+    return found;
 }
 
 void open_url(const char *url) { ShellExecuteA(0, "open", url, 0, 0, 1); }

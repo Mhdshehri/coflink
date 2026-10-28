@@ -68,6 +68,7 @@ bool ui_poll(Cmd *c)
     case 'q': case 'Q': c->kind = CMD_QUIT; break;
     case 's': case 'S': c->kind = CMD_STATUS; break;
     case 'x': case 'X': c->kind = CMD_STOP; break;
+    case 'c': case 'C': c->kind = CMD_CONNECT; break;
     case 'h': case 'H': c->kind = CMD_HOST; break;
     case 'j': case 'J': c->kind = CMD_JOIN; break;
     case 'l': case 'L':
@@ -98,9 +99,11 @@ int main(int argc, char **argv)
     Cmd first = { CMD_NONE, 0 };
     int port = 0;
     u64 lobby = 0;
+    bool idle = false; /* start on the start screen, like the window does */
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
-        if (!strcmp(a, "host")) first.kind = CMD_HOST;
+        if (!strcmp(a, "idle")) idle = true;
+        else if (!strcmp(a, "host")) first.kind = CMD_HOST;
         else if (!strcmp(a, "join")) first.kind = CMD_JOIN;
         else if (!strcmp(a, "--port") && i + 1 < argc) port = atoi(argv[++i]);
         else if (!strcmp(a, "--players") && i + 1 < argc) o.max_players = atoi(argv[++i]);
@@ -113,7 +116,7 @@ int main(int argc, char **argv)
         else o.local_port = (uint16_t)port;
     }
     if (lobby) { first.kind = CMD_JOIN_LOBBY; first.arg = lobby; }
-    if (first.kind == CMD_NONE) {
+    if (first.kind == CMD_NONE && !idle) {
         printf("usage: coflink host | join [lobby id]\n");
         return 1;
     }

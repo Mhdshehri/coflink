@@ -11,7 +11,8 @@ typedef enum {
     CMD_JOIN,        /* start looking for a host */
     CMD_JOIN_LOBBY,  /* arg = lobby id */
     CMD_INVITE,      /* arg = friend's Steam id */
-    CMD_LAUNCH,      /* start Cry of Fear and connect */
+    CMD_LAUNCH,      /* start Cry of Fear (through Steam, as usual) */
+    CMD_CONNECT,     /* connect the running game to the host now */
     CMD_STATUS,      /* print a status line */
     CMD_STOP,        /* stop hosting/joining, back to the start screen */
     CMD_QUIT,

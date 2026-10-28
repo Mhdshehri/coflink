@@ -16,7 +16,8 @@ mkdef() { # name, then exports
 mkdef kernel32 Sleep@4 GetTickCount64@0 GetModuleFileNameA@12 SetCurrentDirectoryA@4 \
     GlobalAlloc@8 GlobalLock@4 GlobalUnlock@4 LoadLibraryExA@12 GetProcAddress@8 \
     CreateThread@24 WaitForSingleObject@8 InitializeCriticalSection@4 EnterCriticalSection@4 \
-    LeaveCriticalSection@4 MultiByteToWideChar@24 WideCharToMultiByte@32 GetModuleHandleW@4
+    LeaveCriticalSection@4 MultiByteToWideChar@24 WideCharToMultiByte@32 GetModuleHandleW@4 \
+    CreateToolhelp32Snapshot@8 Process32First@8 Process32Next@8 CloseHandle@4
 mkdef user32 OpenClipboard@4 EmptyClipboard@0 SetClipboardData@8 CloseClipboard@0 \
     RegisterClassExW@4 CreateWindowExW@48 DefWindowProcW@16 GetMessageW@16 TranslateMessage@4 \
     DispatchMessageW@4 IsDialogMessageW@8 PostQuitMessage@4 SendMessageW@16 SetWindowTextW@8 \

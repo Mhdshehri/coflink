@@ -356,11 +356,139 @@ def main():
             except subprocess.TimeoutExpired: x.kill()
         j6.stop()
 
+        print("[12] automatic connect: waits for the host's server and the friend's game, then connects")
+        hz = Proc("HZ", dict(base, MOCK_ID="1051", MOCK_FRIENDS="1052,1053,1054"), ["host", "--port", "27999"])  # server not started
+        procs.append(hz)
+        hz.wait_for(r"Lobby is ready")
+        jz = Proc("JZ", dict(base, MOCK_ID="1052", MOCK_FRIENDS="1051", MOCK_COF="1"), ["join", "--yes"])
+        procs.append(jz)
+        check(jz.wait_for(r"Connected to user1051") is not None, "joiner connected to the host")
+        check(jz.wait_for(r"Waiting for user1051 to start their co-op game", 10) is not None,
+              "host's co-op game not running: joiner says it is waiting")
+        time.sleep(3)
+        check("steam://connect" not in jz.log, "and does not try to connect the game yet")
+        jz.stop(); hz.stop()
+        hr = Proc("HR", dict(base, MOCK_ID="1051", MOCK_FRIENDS="1052,1053,1054"), ["host"])
+        procs.append(hr)
+        hr.wait_for(r"Lobby is ready")
+        jn = Proc("JN", dict(base, MOCK_ID="1053", MOCK_FRIENDS="1051"), ["join", "--yes"])  # game not running
+        procs.append(jn)
+        check(jn.wait_for(r"user1051's Cry of Fear co-op game is up", 10) is not None, "joiner checked the host's server is up")
+        check(jn.wait_for(r"Now start Cry of Fear", 5) is not None, "game not running yet: tells the friend to start it")
+        time.sleep(2)
+        check("steam://connect" not in jn.log, "and does not connect anything yet")
+        jn.stop()
+        ja = Proc("JA", dict(base, MOCK_ID="1052", MOCK_FRIENDS="1051", MOCK_COF="1"), ["join", "--yes"])
+        procs.append(ja)
+        check(ja.wait_for(r"Cry of Fear is running") is not None, "game running is detected")
+        m = ja.wait_for(r"would open steam://connect/127\.0\.0\.1:(\d+)", 15)
+        check(m is not None and m.group(1) == "27115", "then CoFLink connects the game (steam://connect to its own port)")
+        ja.stop(); hr.stop()
+
+        print("[13] accepting a Steam invite from the start screen joins directly")
+        hi = Proc("HI", dict(base, MOCK_ID="1061", MOCK_FRIENDS="1062"), ["host"])
+        procs.append(hi)
+        hi.wait_for(r"Lobby is ready")
+        ji = Proc("JI", dict(base, MOCK_ID="1062", MOCK_FRIENDS=""), ["idle", "--no-launch"])
+        procs.append(ji)
+        time.sleep(1)
+        lobi = re.search(r"id (\d+)", hi.log).group(1)
+        with open(os.path.join(d, "invite_1062"), "w") as f:
+            f.write(f"{lobi} 1061\n")
+        check(ji.wait_for(r"Accepted invite from user1061") is not None,
+              "app just opened (start screen, nothing clicked) sees the accepted invite")
+        check(ji.wait_for(r"Joined user1061's Cry of Fear lobby") is not None, "and joins the host")
+        ji.stop()
+        ji2 = Proc("JI2", dict(base, MOCK_ID="1062", MOCK_FRIENDS=""), ["host", "--no-launch"])
+        procs.append(ji2)
+        ji2.wait_for(r"Lobby is ready")
+        with open(os.path.join(d, "invite_1062"), "w") as f:
+            f.write(f"{lobi} 1061\n")
+        check(ji2.wait_for(r"Got a Steam invite, but you are hosting") is not None, "while hosting, an invite is not taken")
+        ji2.p.stdin = None
+        ji2.stop()
+        e = dict(os.environ, **base, MOCK_ID="1062", MOCK_FRIENDS="", ASAN_OPTIONS="detect_leaks=0")
+        q = subprocess.Popen([BIN, "host", "--no-launch"], env=e, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        qlog = []
+        threading.Thread(target=lambda: [qlog.append(l) for l in q.stdout], daemon=True).start()
+        def qwait(pat, t=8):
+            end = time.time() + t
+            while time.time() < end:
+                if re.search(pat, "".join(qlog)): return True
+                time.sleep(0.05)
+            return False
+        qwait(r"Lobby is ready")
+        q.stdin.write("X\n"); q.stdin.flush()     # Stop -> start screen (Steam stays signed in)
+        check(qwait(r"Stopped\."), "back on the start screen")
+        with open(os.path.join(d, "invite_1062"), "w") as f:
+            f.write(f"{lobi} 1061\n")
+        check(qwait(r"Accepted invite from user1061"), "invite accepted from the start screen")
+        check(qwait(r"Joined user1061's Cry of Fear lobby"), "and it joined the host directly")
+        q.send_signal(signal.SIGINT)
+        try: q.wait(5)
+        except subprocess.TimeoutExpired: q.kill()
+        hi.stop()
+
+        print("[14] the game and Steam's server query share the relay without mixing answers")
+        hs = Proc("HS", dict(base, MOCK_ID="1071", MOCK_FRIENDS="1072"), ["host"])
+        js = Proc("JS", dict(base, MOCK_ID="1072", MOCK_FRIENDS="1071"), ["join", "--no-launch", "--yes"])
+        procs += [hs, js]
+        ps_ = local_port(js)
+        js.wait_for(r"Connected to user1071")
+        before = len(srv.clients)
+        a_ = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); a_.bind(("127.0.0.1", 0)); a_.settimeout(1)
+        b_ = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); b_.bind(("127.0.0.1", 0)); b_.settimeout(1)
+        okA = okB = 0
+        for i in range(100):
+            a_.sendto(b"GAME-%d" % i, ("127.0.0.1", ps_))
+            b_.sendto(b"QUERY-%d" % i, ("127.0.0.1", ps_))
+            try: okA += a_.recvfrom(9000)[0] == b"S:GAME-%d" % i
+            except socket.timeout: pass
+            try: okB += b_.recvfrom(9000)[0] == b"S:QUERY-%d" % i
+            except socket.timeout: pass
+        if okA != 100 or okB != 100:
+            print("---- HS log ----\n" + hs.log + "\n---- JS log ----\n" + js.log + f"\nport={ps_}")
+        check(okA == 100 and okB == 100, f"each program got only its own answers ({okA}/100, {okB}/100)")
+        check(len(srv.clients) - before == 2, "host's server saw them as two separate clients, like on a real PC")
+        hs.stop(); js.stop()
+
+        print("[15] versions must match")
+        with open(os.path.join(d, "lobby_777"), "w") as f:
+            f.write("owner 1081\nmember 1081\ndata coflink 1\ndata coflink_ver 1.1\n")
+        with open(os.path.join(d, "playing_1081"), "w") as f:
+            f.write("777\n")
+        jv = Proc("JV", dict(base, MOCK_ID="1082", MOCK_FRIENDS="1081"), ["join", "--no-launch", "--yes"])
+        procs.append(jv)
+        check(jv.wait_for(r"user1081 uses a different CoFLink version \(1\.1\)") is not None,
+              "an old CoFLink host is refused with a clear message")
+        jv.stop()
+
+        print("[16] host opened CoFLink first, Steam shares nothing: the friend's CoFLink asks directly")
+        hq = Proc("HQ", dict(base, MOCK_ID="1091", MOCK_FRIENDS="1092,1093"), ["host"])
+        procs.append(hq)
+        hq.wait_for(r"Lobby is ready")
+        time.sleep(3)  # host is up well before the friend
+        jq = Proc("JQ", dict(base, MOCK_ID="1092", MOCK_FRIENDS="1091", MOCK_HIDE_LOBBY="1", MOCK_HIDE_RP="1"),
+                  ["join", "--no-launch", "--yes"])
+        procs.append(jq)
+        check(jq.wait_for(r"Found user1091 hosting") is not None, "friend found the host by asking its CoFLink")
+        check(jq.wait_for(r"Connected to user1091") is not None, "and connected")
+        jq.stop()
+        jx = Proc("JX", dict(base, MOCK_ID="1094", MOCK_FRIENDS="1091", MOCK_HIDE_LOBBY="1", MOCK_HIDE_RP="1"),
+                  ["join", "--no-launch", "--yes"])  # 1094 is not on the host's friends list
+        procs.append(jx)
+        time.sleep(8)
+        check("Found user1091" not in jx.log, "someone who isn't the host's friend gets no answer")
+        jx.stop(); hq.stop()
+
         print("[8] bad internet: 10% of packets lost each way")
         h3 = Proc("H3", dict(base, MOCK_ID="1021", MOCK_FRIENDS="1022", MOCK_LOSS="10"), ["host"])
         j3 = Proc("J3", dict(base, MOCK_ID="1022", MOCK_FRIENDS="1021", MOCK_LOSS="10"), ["join", "--no-launch", "--yes"])
         procs += [h3, j3]
-        check(j3.wait_for(r"Connected to user1021") is not None, "joiner still connects (control messages are reliable)")
+        ok3 = j3.wait_for(r"Connected to user1021") is not None
+        if not ok3: print("---- H3 log ----\n" + h3.log + "\n---- J3 log ----\n" + j3.log)
+        check(ok3, "joiner still connects (control messages are reliable)")
         p3 = local_port(j3)
         n, exact, ordered = stream_test(p3, 1000) if p3 else (0, False, False)
         check(700 <= n < 1000, f"about 81% of round trips survive, as expected for 10% loss each way ({n}/1000)")
