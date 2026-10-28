@@ -1,4 +1,4 @@
-CoFLink 0.6 (beta) - Cry of Fear co-op with a Steam friend
+CoFLink 0.7 (beta) - Cry of Fear co-op with a Steam friend
 =====================================================
 No VPN (no Hamachi/Radmin), no port forwarding, no IP addresses.
 One program for both players: open CoFLink.exe and click a button.
@@ -6,7 +6,7 @@ One program for both players: open CoFLink.exe and click a button.
 Both of you need: Windows, Steam running and logged in, Cry of Fear
 installed from Steam, and this whole folder (unzip it anywhere, e.g. Desktop).
 Keep CoFLink.exe and steam_api.dll together in the same folder.
-You BOTH need the same CoFLink version (0.6).
+You BOTH need the same CoFLink version (0.7).
 
 Before the first game, both of you: in Steam, right-click Cry of Fear ->
 Properties -> Installed Files -> "Verify integrity of game files".
@@ -21,8 +21,8 @@ HOST (the person whose game everyone joins)
    launcher), then start a Co-op game and choose LAN.
    (Choosing LAN is the same as typing  sv_lan 1  in the console.)
 3. Your friend clicks "Join a friend" in their CoFLink - you show up in
-   their list. If not, click "Copy id" and send them the lobby id in
-   Steam chat. Friends who are linked show up in your list.
+   their list. If not, click "Copy code" and send them the short lobby
+   code (like 1MCE-2B2) in Steam chat. Friends who are linked show up in your list.
 4. Keep CoFLink open while you play. Click Stop (or close it) when done.
 
 
@@ -30,8 +30,8 @@ FRIEND (joining)
 ----------------
 CoFLink only LINKS you to the host. You join the game yourself.
 1. Open CoFLink.exe and click "Join a friend". Pick the host under
-   "Friends hosting" and click Join (or paste the lobby id the host sent
-   you and click "Join this id").
+   "Friends hosting" and click Join (or paste the lobby code the host sent
+   you, like 1MCE-2B2, and click "Join this code").
    Steam invites are not used - ignore them.
 2. Wait for "...co-op game is up" in the log.
 3. Click "Start Cry of Fear" (starts the game without its launcher), or
@@ -108,9 +108,9 @@ TROUBLESHOOTING (read the log at the bottom of the window)
     Host/Join again.
 "steam_api.dll is not the expected file / missing": use the steam_api.dll
     from this zip, in the same folder as CoFLink.exe.
-Friend: the host never shows up:  check you both have CoFLink 0.6 and are
-    Steam friends. Or ask for the lobby id ("Copy id" on the host's side)
-    and use "Join this id".
+Friend: the host never shows up:  check you both have CoFLink 0.7 and are
+    Steam friends. Or ask for the lobby code ("Copy code" on the host's
+    side) and use "Join this code".
 "uses a different CoFLink version":  both of you download the same version.
 Friend: "Waiting for <host> to start their co-op game":  the host starts a
     co-op game in Cry of Fear and types sv_lan 1.

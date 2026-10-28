@@ -205,6 +205,20 @@ def rtt_ms(port, n=200):
     return t[len(t) // 2] if t else 999
 
 
+ALPHA = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def code_to_id(code):
+    v = 0
+    for ch in code.replace("-", ""):
+        v = v * 32 + ALPHA.index(ch)
+    return str(0x0186000000000000 | v)
+
+
+def lobby_id_from(log):
+    return code_to_id(re.search(r"code ([0-9A-Z]{4}-[0-9A-Z]{3})", log).group(1))
+
+
 def local_port(proc):
     m = proc.wait_for(r"connect 127\.0\.0\.1:(\d+)")
     return int(m.group(1)) if m else None
@@ -276,7 +290,7 @@ def main():
         c = Proc("C", dict(base, MOCK_ID="1005", MOCK_FRIENDS="1001"), ["idle", "--no-launch"])
         procs.append(c)
         time.sleep(1)
-        lobby = re.search(r"id (\d+)", host.log).group(1)
+        lobby = lobby_id_from(host.log)
         with open(os.path.join(d, "invite_1005"), "w") as f:  # what InviteUserToLobby does in the mock
             f.write(f"{lobby} 1001\n")
         check(c.wait_for(r"Steam invites aren't used") is not None, "C is told to use Join a friend instead")
@@ -304,7 +318,7 @@ def main():
         procs.append(j)
         check(j.wait_for(r"not a Cry of Fear co-op game") is not None, "joiner refused the foreign lobby")
         time.sleep(4)
-        check(j.log.count("Joining lobby 555") == 1, "and did not keep retrying it")
+        check(j.log.count("Joining lobby") == 1, "and did not keep retrying it")
         j.stop()
 
         print("[7] confirmation: without --yes the joiner asks first and a 'no' joins nothing")
@@ -333,8 +347,8 @@ def main():
         check(p4 is not None and game_client(p4, "RP", n=50) == 50, "packets flow")
         j4.stop()
 
-        print("[10] manual: press L and paste the lobby id")
-        lob4 = re.search(r"id (\d+)", h4.log).group(1)
+        print("[10] manual: press L and paste the short lobby code")
+        lob4 = re.search(r"code ([0-9A-Z]{4}-[0-9A-Z]{3})", h4.log).group(1)  # paste the short code
         e = dict(os.environ, **base, MOCK_ID="1033", MOCK_FRIENDS="", ASAN_OPTIONS="detect_leaks=0")
         with open(os.path.join(d, "friends_note"), "w"):
             pass
@@ -345,8 +359,8 @@ def main():
         time.sleep(3.0)
         q.send_signal(signal.SIGINT)
         out, _ = q.communicate(timeout=5)
-        check("Paste the host's lobby id" in out, "L asked for the lobby id")
-        check("Joined user1031's Cry of Fear lobby" in out, "pasting the id joined the host's lobby")
+        check("Paste the host's lobby code" in out, "L asked for the lobby code")
+        check("Joined user1031's Cry of Fear lobby" in out, "pasting the code joined the host's lobby")
         check(h4.wait_for(r"Blocked user1033: they are in the lobby but not on your Steam friends list") is not None,
               "a non-friend joining by id still can't reach the server")
         h4.stop()
@@ -364,7 +378,7 @@ def main():
                 time.sleep(0.05)
             return False
         check(swwait(r"Lobby is ready"), "app hosts")
-        lobfile = re.search(r"id (\d+)", "".join(swlog)).group(1)
+        lobfile = lobby_id_from("".join(swlog))
         sw.stdin.write("X\n"); sw.stdin.flush()
         check(swwait(r"Stopped\."), "Stop works")
         time.sleep(0.3)
@@ -410,7 +424,7 @@ def main():
         hi = Proc("HI", dict(base, MOCK_ID="1061", MOCK_FRIENDS="1062"), ["host"])
         procs.append(hi)
         hi.wait_for(r"Lobby is ready")
-        lobi = re.search(r"id (\d+)", hi.log).group(1)
+        lobi = lobby_id_from(hi.log)
         ji2 = Proc("JI2", dict(base, MOCK_ID="1062", MOCK_FRIENDS="1061"), ["host", "--no-launch"])
         procs.append(ji2)
         ji2.wait_for(r"Lobby is ready")
@@ -505,7 +519,7 @@ def main():
         hv = Proc("HV", dict(base, MOCK_ID="1111", MOCK_FRIENDS="1112"), ["host"])
         procs.append(hv)
         hv.wait_for(r"Lobby is ready")
-        lobv = re.search(r"id (\d+)", hv.log).group(1)
+        lobv = lobby_id_from(hv.log)
         jv1 = Proc("JV1", dict(base, MOCK_ID="1112", MOCK_FRIENDS="1111", MOCK_INVITE_NOT_ACCEPTED="1"), ["idle", "--no-launch"])
         procs.append(jv1)
         time.sleep(1)

@@ -14,7 +14,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.6"
+#define VERSION "0.7"
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
 #define SPACEWAR_APPID 480
@@ -49,6 +49,17 @@ static uint8_t g_buf[BUF_SIZE];
 
 
 /* ---------- output ---------- */
+
+void lobby_code(u64 lobby, char out[16]);
+
+static const char *codestr(u64 lobby)
+{
+    static char ring[4][16];
+    static int k;
+    char *o = ring[k++ & 3];
+    lobby_code(lobby, o);
+    return o;
+}
 
 static void say(const char *fmt, ...)
 {
@@ -305,7 +316,7 @@ static void request_join(u64 lobby)
         reset_join_state();
     }
     g_joining = lobby;
-    say("Joining lobby %s ...", idstr(lobby));
+    say("Joining lobby %s ...", codestr(lobby));
     S.MM_JoinLobby(MM, lobby);
 }
 
@@ -395,13 +406,13 @@ static void on_lobby_created(int32_t result, u64 lobby)
     S.Friends_SetRichPresence(F, "status", "Hosting Cry of Fear co-op (CoFLink)");
     S.Friends_SetRichPresence(F, "connect", conn);
     S.Friends_SetRichPresence(F, "coflink", "host");
-    clipboard_set(idstr(lobby));
+    clipboard_set(codestr(lobby));
     say("");
-    say("=== Lobby is ready (id %s, copied to clipboard) ===", idstr(lobby));
+    say("=== Lobby is ready (code %s, copied to clipboard) ===", codestr(lobby));
     say("1. Start Cry of Fear and create your co-op server as usual (Co-op -> Create game).");
     say("   In the console (~) type:  sv_lan 1   (your friends will look like LAN players)");
     say("2. Your friend opens CoFLink and clicks \"Join a friend\" (if you don't show up,");
-    say("   send them the lobby id above to paste into their CoFLink).");
+    say("   send them the lobby code above to paste into their CoFLink).");
     say("   Once linked, they connect from their game's console:  connect 127.0.0.1:27115");
     say("");
 }
@@ -564,7 +575,7 @@ static void scan_for_host(bool verbose)
     if (pick) request_join(pick);
     else if (!n && verbose) {
         say("No friend is hosting yet. Waiting...");
-        say("  Or: paste the host's lobby id.");
+        say("  Or: paste the host's lobby code.");
     }
 }
 
@@ -969,7 +980,7 @@ static void make_status(UiState *st)
 static void print_status(void)
 {
     if (g_is_host) {
-        if (!g_npeers) { say("Status: lobby %s open, no friends connected yet.", idstr(g_lobby)); return; }
+        if (!g_npeers) { say("Status: lobby %s open, no friends connected yet.", codestr(g_lobby)); return; }
         for (int i = 0; i < g_npeers; i++) {
             Peer *p = &g_peers[i];
             say("Status: %s - %s (to your server %s, back %s packets)", who(p->id),
@@ -991,7 +1002,7 @@ static void handle_cmd(const Cmd *c)
     case CMD_HOST: start_mode(MODE_HOST); break;
     case CMD_JOIN: start_mode(MODE_JOIN); break;
     case CMD_JOIN_LOBBY:
-        if (!c->arg) { say("! That isn't a lobby id."); break; }
+        if (!c->arg) { say("! That isn't a lobby code."); break; }
         if (g_mode != MODE_JOIN) start_mode(MODE_JOIN);
         if (g_mode == MODE_JOIN) { g_joining = 0; request_join(c->arg); }
         break;

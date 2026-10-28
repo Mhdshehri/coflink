@@ -5,6 +5,9 @@
 #include "ui.h"
 #include "plat.h"
 
+void lobby_code(u64 lobby, char out[16]);
+u64 lobby_parse(const char *s);
+
 #define WINAPI __attribute__((stdcall))
 #define IMP __declspec(dllimport)
 typedef void *HANDLE, *HWND, *HINSTANCE, *HICON, *HCURSOR, *HBRUSH, *HFONT, *HDC, *HMENU;
@@ -252,10 +255,10 @@ static void build(void)
     ctl(ID_JOIN, B, WTEXT("Join a friend"), WS_TABSTOP, 0, 204, 40, 180, 38, g_bold);
     ctl(ID_STOP, B, WTEXT("Stop"), WS_TABSTOP, 0, 486, 40, 100, 38, g_font);
     ctl(ID_STATUS, T, WTEXT(""), 0, 0, 14, 90, 572, 26, g_big);
-    ctl(ID_LOBBYLABEL, T, WTEXT("Lobby id:"), 0, 0, 14, 130, 70, 22, g_font);
+    ctl(ID_LOBBYLABEL, T, WTEXT("Lobby code:"), 0, 0, 14, 130, 70, 22, g_font);
     ctl(ID_LOBBY, E, WTEXT(""), WS_TABSTOP | ES_AUTOHSCROLL, WS_EX_CLIENTEDGE, 84, 127, 250, 24, g_font);
-    ctl(ID_COPYID, B, WTEXT("Copy id"), WS_TABSTOP, 0, 342, 126, 100, 26, g_font);
-    ctl(ID_JOINID, B, WTEXT("Join this id"), WS_TABSTOP, 0, 450, 126, 136, 26, g_font);
+    ctl(ID_COPYID, B, WTEXT("Copy code"), WS_TABSTOP, 0, 342, 126, 100, 26, g_font);
+    ctl(ID_JOINID, B, WTEXT("Join this code"), WS_TABSTOP, 0, 450, 126, 136, 26, g_font);
     ctl(ID_LISTLABEL, T, WTEXT(""), 0, 0, 14, 166, 572, 20, g_font);
     ctl(ID_LIST, L, WTEXT(""), WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT, WS_EX_CLIENTEDGE,
         14, 188, 430, 112, g_font);
@@ -347,7 +350,7 @@ static void on_timer(void)
         set_text(ID_STATUS, st.status);
         if (lobby_changed) {
             char id[24] = "";
-            if (st.lobby) u64_to_str(st.lobby, id);
+            if (st.lobby) lobby_code(st.lobby, id);
             if (st.lobby || st.mode != MODE_JOIN) set_text(ID_LOBBY, id);
         }
     }
@@ -369,24 +372,20 @@ static void on_command(int id, int code)
     case ID_STOP: push_cmd(CMD_STOP, 0); break;
     case ID_COPYID:
         if (g_shown.lobby) {
-            char id_[24];
-            u64_to_str(g_shown.lobby, id_);
-            copy_text(id_);
-            ui_log("Lobby id copied. Send it to your friend (Steam chat).");
+            char code[16];
+            lobby_code(g_shown.lobby, code);
+            copy_text(code);
+            ui_log("Lobby code copied. Send it to your friend (Steam chat).");
         }
         break;
     case ID_JOINID: {
         WCHAR w[64];
-        char a[64], digits[24];
+        char a[64];
         GetWindowTextW(g_c[ID_LOBBY], w, 64);
         WideCharToMultiByte(CP_UTF8, 0, w, -1, a, 64, 0, 0);
-        int k = 0;
-        for (int i = 0; a[i] && k < 20; i++)
-            if (a[i] >= '0' && a[i] <= '9') digits[k++] = a[i];
-        digits[k] = 0;
-        u64 lob = k >= 10 ? str_to_u64(digits) : 0;
+        u64 lob = lobby_parse(a);
         if (!lob) {
-            MessageBoxW(g_wnd, WTEXT("Paste the lobby id your friend sent you (a long number) into the Lobby id box first."),
+            MessageBoxW(g_wnd, WTEXT("Paste the lobby code your friend sent you (like 1PCW-4HB) into the Lobby code box first."),
                         WTEXT("CoFLink"), MB_ICONWARNING);
             break;
         }
@@ -497,7 +496,7 @@ int main(int argc, char **argv)
     if (!g_wnd) return 1;
     build();
     ui_log("HOST: click \"Host a game\", then \"Start Cry of Fear\" and create a LAN co-op game.");
-    ui_log("FRIEND: click \"Join a friend\" and pick the host (or paste their lobby id).");
+    ui_log("FRIEND: click \"Join a friend\" and pick the host (or paste their lobby code).");
     ui_log("        Once linked: start Cry of Fear, press ~ and paste  connect 127.0.0.1:27115");
     ui_log("");
     on_timer();

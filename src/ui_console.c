@@ -7,6 +7,8 @@
 #include "ui.h"
 #include "plat.h"
 
+u64 lobby_parse(const char *s);
+
 static bool g_yes;
 static int g_mode;
 static UiPerson g_friends[200];
@@ -72,9 +74,9 @@ bool ui_poll(Cmd *c)
     case 'h': case 'H': c->kind = CMD_HOST; break;
     case 'j': case 'J': c->kind = CMD_JOIN; break;
     case 'l': case 'L':
-        printf("Paste the host's lobby id (right-click or Ctrl+V), then Enter: ");
+        printf("Paste the host's lobby code (right-click or Ctrl+V), then Enter: ");
         fflush(0);
-        if (read_line(line, sizeof line)) { c->kind = CMD_JOIN_LOBBY; c->arg = str_to_u64(line); }
+        if (read_line(line, sizeof line)) { c->kind = CMD_JOIN_LOBBY; c->arg = lobby_parse(line); }
         break;
     default: break;
     }
@@ -98,7 +100,7 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--players") && i + 1 < argc) o.max_players = atoi(argv[++i]);
         else if (!strcmp(a, "--no-launch")) o.no_launch = true;
         else if (!strcmp(a, "--yes")) g_yes = true;
-        else if (a[0] >= '0' && a[0] <= '9') lobby = str_to_u64(a);
+        else if (lobby_parse(a)) lobby = lobby_parse(a); /* a lobby code or full id */
     }
     if (port > 0 && port < 65536) {
         if (first.kind == CMD_HOST) o.game_port = (uint16_t)port;

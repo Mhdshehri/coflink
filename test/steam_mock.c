@@ -337,7 +337,7 @@ static void m_ClearRichPresence(void *s)
 static u64 m_CreateLobby(void *s, int type, int max)
 {
     (void)s; (void)type; (void)max;
-    u64 l = 109775240000000000ULL + me * 10 + (u64)(rand() % 10);
+    u64 l = 0x0186000000000000ULL | (me * 10 + (u64)(rand() % 10)); /* real lobby ids look like this */
     Lobby L = { 0 };
     L.owner = me; L.mem[L.nmem++] = me; L.exists = true;
     lobby_lock();
