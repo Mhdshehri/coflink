@@ -152,9 +152,17 @@ static void check_invites(void)
     if (!f) return;
     unsigned long long l = 0, from = 0;
     if (fscanf(f, "%llu %llu", &l, &from) == 2) {
-        uint8_t u[16]; u64 L = l, F = from;
-        memcpy(u, &L, 8); memcpy(u + 8, &F, 8);
-        push_cb(333, u, 16, 0);
+        u64 L = l, F = from, game = 480;
+        if (!getenv("MOCK_NO_INVITE_ARRIVAL")) { /* LobbyInvite_t: user, lobby, game id */
+            uint8_t iv[24];
+            memcpy(iv, &F, 8); memcpy(iv + 8, &L, 8); memcpy(iv + 16, &game, 8);
+            push_cb(503, iv, 24, 0);
+        }
+        if (!getenv("MOCK_INVITE_NOT_ACCEPTED")) {
+            uint8_t u[16]; /* GameLobbyJoinRequested_t: the player accepted it */
+            memcpy(u, &L, 8); memcpy(u + 8, &F, 8);
+            push_cb(333, u, 16, 0);
+        }
     }
     fclose(f);
     unlink(p);

@@ -80,6 +80,7 @@ u64 msg_sender(void *m);
 enum {
     CB_GameLobbyJoinRequested = 333,
     CB_GameRichPresenceJoinRequested = 337,
+    CB_LobbyInvite = 503,   /* someone invited you (not accepted yet) */
     CB_LobbyEnter = 504,
     CB_LobbyChatUpdate = 506,
     CB_LobbyCreated = 513,

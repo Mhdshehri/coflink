@@ -12,7 +12,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.3"
+#define VERSION "0.4"
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
 #define SPACEWAR_APPID 480
@@ -45,6 +45,9 @@ static uint16_t g_local_port_base = 27115;
 static int g_max_players = 4;
 static bool g_no_launch;
 static uint8_t g_buf[BUF_SIZE];
+static uint8_t g_fix[2048];
+static bool g_said_fixed;
+int a2s_fix_appid(const uint8_t *in, int n, uint8_t *out, int cap, uint32_t appid);
 
 /* ---------- output ---------- */
 
@@ -467,6 +470,18 @@ static void handle_cb(int cb, uint8_t *p, int size)
         }
         break;
     }
+    case CB_LobbyInvite:
+        /* An invite just arrived. From a Steam friend, while CoFLink is open
+           and not hosting or already in a game: join right away. */
+        if (size >= 16) {
+            u64 from = rd64(p), lob = rd64(p + 8);
+            if (!S.Friends_HasFriend(F, from, FRIEND_IMMEDIATE)) break;
+            if (g_is_host) { say("%s invited you, but you are hosting. Click Stop, then accept the invite in Steam.", who(from)); break; }
+            if (g_lobby || g_joining) { say("%s invited you, but you are already in a game. Click Stop first to switch.", who(from)); break; }
+            say("%s invited you - joining their game.", who(from));
+            accept_lobby(lob);
+        }
+        break;
     case CB_GameLobbyJoinRequested:
         /* The player accepted a Steam invite (or clicked Join Game): that is
            their yes, so join from any screen - unless they are hosting. */
@@ -632,6 +647,14 @@ static void drain_steam(void)
                         say("%s's Cry of Fear co-op game is up.", who(g_host));
                     }
                 } else if (g_slot_port[slot]) {
+                    /* Steam checks the server's info reply before connecting the
+                       game; give it Cry of Fear's app id (only info replies change). */
+                    int fixed = a2s_fix_appid(body, len, g_fix, (int)sizeof g_fix, COF_APPID);
+                    if (fixed > 0) {
+                        body = g_fix;
+                        len = fixed;
+                        if (!g_said_fixed) { g_said_fixed = true; say("(Gave Steam the server's game id, so it lets the game connect.)"); }
+                    }
                     udp_sendto(g_game_sock, body, len, g_game_ip, g_slot_port[slot]);
                     g_server_ready = true;
                     if (!g_down++ && !g_said_down) {

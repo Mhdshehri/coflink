@@ -1,4 +1,4 @@
-CoFLink 0.3 (beta) - Cry of Fear co-op with a Steam friend
+CoFLink 0.4 (beta) - Cry of Fear co-op with a Steam friend
 =====================================================
 No VPN (no Hamachi/Radmin), no port forwarding, no IP addresses.
 One program for both players: open CoFLink.exe and click a button.
@@ -6,7 +6,7 @@ One program for both players: open CoFLink.exe and click a button.
 Both of you need: Windows, Steam running and logged in, Cry of Fear
 installed from Steam, and this whole folder (unzip it anywhere, e.g. Desktop).
 Keep CoFLink.exe and steam_api.dll together in the same folder.
-You BOTH need the same CoFLink version (0.3).
+You BOTH need the same CoFLink version (0.4).
 
 Before the first game, both of you: in Steam, right-click Cry of Fear ->
 Properties -> Installed Files -> "Verify integrity of game files".
@@ -28,7 +28,8 @@ HOST (the person whose game everyone joins)
 FRIEND (joining)
 ----------------
 1. Open CoFLink.exe. Then either:
-   - accept the host's Steam invite, or
+   - let the host invite you: with CoFLink open, the invite is picked up
+     by itself (or accept it in Steam), or
    - click "Join a friend", pick the host under "Friends hosting", click Join, or
    - paste the lobby id the host sent you and click "Join this id".
 2. Start Cry of Fear the normal way (from Steam). You don't need to type
@@ -105,7 +106,7 @@ TROUBLESHOOTING (read the log at the bottom of the window)
     Host/Join again.
 "steam_api.dll is not the expected file / missing": use the steam_api.dll
     from this zip, in the same folder as CoFLink.exe.
-Friend: the host never shows up:  check you both have CoFLink 0.3 and are
+Friend: the host never shows up:  check you both have CoFLink 0.4 and are
     Steam friends. Or ask for the lobby id ("Copy id" on the host's side)
     and use "Join this id", or have the host Invite you.
 "uses a different CoFLink version":  both of you download the same version.
