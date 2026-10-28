@@ -564,6 +564,35 @@ def main():
         out = launch_log({"MOCK_COF_DIR": g1, "MOCK_COF": "1"})
         check("Cry of Fear is already running" in out and "would run" not in out, "doesn't start a second copy")
 
+        print("[21] Refresh: see right away when a friend starts hosting")
+        e = dict(os.environ, **base, MOCK_ID="1142", MOCK_FRIENDS="1141", ASAN_OPTIONS="detect_leaks=0")
+        rq = subprocess.Popen([BIN, "idle", "--no-launch"], env=e, stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        rlog = []
+        threading.Thread(target=lambda: [rlog.append(l) for l in rq.stdout], daemon=True).start()
+        def rwait(pat, t=8):
+            end = time.time() + t
+            while time.time() < end:
+                if re.search(pat, "".join(rlog)): return True
+                time.sleep(0.02)
+            return False
+        time.sleep(1)
+        rq.stdin.write("R\n"); rq.stdin.flush()
+        check(rwait(r"Refreshing\.\.\."), "Refresh works from the start screen")
+        check(rwait(r"Nobody is hosting right now"), "and says plainly when nobody hosts")
+        hh = Proc("HH", dict(base, MOCK_ID="1141", MOCK_FRIENDS="1142", MOCK_HIDE_LOBBY="1", MOCK_HIDE_RP="1"), ["host"])
+        procs.append(hh)
+        hh.wait_for(r"Lobby is ready")
+        t0 = time.time()
+        rq.stdin.write("R\n"); rq.stdin.flush()
+        ok = rwait(r"Found user1141 hosting", 5)
+        dt = time.time() - t0
+        check(ok and dt < 3, f"after Refresh the new host shows up within ~2 s ({dt:.1f} s)")
+        rq.send_signal(signal.SIGINT)
+        try: rq.wait(5)
+        except subprocess.TimeoutExpired: rq.kill()
+        hh.stop()
+
         print("[8] bad internet: 10% of packets lost each way")
         h3 = Proc("H3", dict(base, MOCK_ID="1021", MOCK_FRIENDS="1022", MOCK_LOSS="10"), ["host"])
         j3 = Proc("J3", dict(base, MOCK_ID="1022", MOCK_FRIENDS="1021", MOCK_LOSS="10"), ["join", "--no-launch", "--yes"])

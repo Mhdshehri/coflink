@@ -14,7 +14,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.7"
+#define VERSION "0.8"
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
 #define SPACEWAR_APPID 480
@@ -520,7 +520,11 @@ static bool rejected(u64 lobby)
     return false;
 }
 
-static void scan_for_host(bool verbose)
+static int g_last_found_n = -1;
+static int g_refresh;      /* Refresh button: 1 = scan now, 2 = scan again shortly and report */
+static u64 g_refresh_at;
+
+static int scan_for_host(bool verbose)
 {
     /* Two ways to see a hosting friend, because Steam doesn't always fill in
        the first: (1) the lobby in their "game played" info, (2) the
@@ -566,9 +570,8 @@ static void scan_for_host(bool verbose)
         sfmt(found[n].name, UI_NAME, "%s", who(id));
         n++;
     }
-    static int last_n = -1;
-    if (n != last_n && n > 0) say(n == 1 ? "Found %s hosting." : "Found %s friends hosting.", n == 1 ? found[0].name : idstr((u64)n));
-    last_n = n;
+    if (n != g_last_found_n && n > 0) say(n == 1 ? "Found %s hosting." : "Found %s friends hosting.", n == 1 ? found[0].name : idstr((u64)n));
+    g_last_found_n = n;
     u64 reject = 0;
     u64 pick = ui_offer_hosts(n, found, &reject);
     if (reject && g_nrejected < 16) g_rejected[g_nrejected++] = reject;
@@ -577,6 +580,7 @@ static void scan_for_host(bool verbose)
         say("No friend is hosting yet. Waiting...");
         say("  Or: paste the host's lobby code.");
     }
+    return n;
 }
 
 /* ---------- relay loops ---------- */
@@ -1009,6 +1013,17 @@ static void handle_cmd(const Cmd *c)
     case CMD_LAUNCH: /* "Start Cry of Fear" */
         start_game();
         break;
+    case CMD_REFRESH: /* look for a hosting friend right now */
+        if (g_is_host) { say("You are hosting. Refresh is for finding a friend who hosts."); break; }
+        if (g_mode != MODE_JOIN) start_mode(MODE_JOIN);
+        if (g_mode != MODE_JOIN) break;
+        if (g_lobby || g_joining) { say("Already linked. Click Stop first to look for someone else."); break; }
+        say("Refreshing...");
+        g_nrejected = 0;               /* offer hosts you said no to again */
+        g_last_found_n = -1;           /* and say who is hosting, even if unchanged */
+        for (int i = 0; i < 32; i++) g_ans[i].asked = 0; /* ask friends' CoFLink again now */
+        g_refresh = 1;
+        break;
     case CMD_STATUS: print_status(); break;
     case CMD_STOP: stop_mode(false); break;
     case CMD_QUIT: g_quit = 1; break;
@@ -1044,10 +1059,20 @@ void engine_run(const EngineOpts *o, Cmd first)
             if (g_lobby && (!last_friends || t - last_friends > 1000)) { publish_connected(); last_friends = t; }
         } else if (g_mode == MODE_JOIN) {
             join_tick();
-            if (!g_lobby && !g_joining && (!last_scan || t - last_scan > 3000)) {
+            if (!g_lobby && !g_joining && g_refresh == 1) {
+                scan_for_host(false);
+                g_refresh = 2;                 /* answers to direct questions take a moment */
+                g_refresh_at = last_scan = now_ms();
+            } else if (!g_lobby && !g_joining && g_refresh == 2 && t - g_refresh_at > 1500) {
+                if (scan_for_host(false) == 0)
+                    say("Nobody is hosting right now. When your friend clicks \"Host a game\", click Refresh again.");
+                g_refresh = 0;
+                last_scan = now_ms();
+            } else if (!g_lobby && !g_joining && (!last_scan || t - last_scan > 3000)) {
                 scan_for_host(last_scan == 0);
                 last_scan = now_ms();
             }
+            if (g_lobby || g_joining) g_refresh = 0;
         }
         Cmd c;
         while (ui_poll(&c)) handle_cmd(&c);
