@@ -593,6 +593,41 @@ def main():
         except subprocess.TimeoutExpired: rq.kill()
         hh.stop()
 
+        print("[22] the host already started Cry of Fear (Steam shows 'playing Cry of Fear'): still found")
+        hg = Proc("HG", dict(base, MOCK_ID="1151", MOCK_FRIENDS="1152,1153,1155"), ["host"])
+        procs.append(hg)
+        hg.wait_for(r"Lobby is ready")
+        jg = Proc("JG", dict(base, MOCK_ID="1152", MOCK_FRIENDS="1151", MOCK_FRIEND_IN_COF="1", MOCK_HIDE_RP="1"),
+                  ["join", "--no-launch", "--yes"])
+        procs.append(jg)
+        check(jg.wait_for(r"Found user1151 hosting", 8) is not None, "found by itself within a few seconds")
+        check(jg.wait_for(r"Connected to user1151") is not None, "and linked")
+        jg.stop()
+        print("     Steam shows no game at all for the host: Refresh still finds them")
+        e = dict(os.environ, **base, MOCK_ID="1153", MOCK_FRIENDS="1151,1199,1198", MOCK_FRIEND_NO_GAME="1", MOCK_HIDE_RP="1",
+                 ASAN_OPTIONS="detect_leaks=0")
+        rq = subprocess.Popen([BIN, "idle", "--no-launch"], env=e, stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        rlog = []
+        threading.Thread(target=lambda: [rlog.append(l) for l in rq.stdout], daemon=True).start()
+        time.sleep(1)
+        rq.stdin.write("R\n"); rq.stdin.flush()
+        end = time.time() + 5
+        while time.time() < end and "Found user1151 hosting" not in "".join(rlog):
+            time.sleep(0.05)
+        check("Found user1151 hosting" in "".join(rlog), "Refresh asks every online friend and finds the host")
+        check("connection attempt" not in "".join(rlog), "friends without CoFLink (1199, 1198) cause no error messages")
+        rq.send_signal(signal.SIGINT)
+        try: rq.wait(5)
+        except subprocess.TimeoutExpired: rq.kill()
+        print("     someone who isn't the host's friend still gets no answer")
+        jn2 = Proc("JN2", dict(base, MOCK_ID="1154", MOCK_FRIENDS="1151", MOCK_FRIEND_IN_COF="1", MOCK_HIDE_RP="1"),
+                   ["join", "--no-launch", "--yes"])
+        procs.append(jn2)
+        time.sleep(7)
+        check("Found user1151" not in jn2.log, "not on the host's friends list: host stays hidden")
+        jn2.stop(); hg.stop()
+
         print("[8] bad internet: 10% of packets lost each way")
         h3 = Proc("H3", dict(base, MOCK_ID="1021", MOCK_FRIENDS="1022", MOCK_LOSS="10"), ["host"])
         j3 = Proc("J3", dict(base, MOCK_ID="1022", MOCK_FRIENDS="1021", MOCK_LOSS="10"), ["join", "--no-launch", "--yes"])

@@ -301,6 +301,8 @@ static bool m_GetFriendGamePlayed(void *s, u64 id, void *info)
     fclose(f);
     if (ok != 1) return false;
     u64 game = 480, L = getenv("MOCK_HIDE_LOBBY") ? 0 : l;
+    if (getenv("MOCK_FRIEND_IN_COF")) { game = 223710; L = 0; }  /* Steam shows "playing Cry of Fear" */
+    if (getenv("MOCK_FRIEND_NO_GAME")) return false;             /* Steam shows no game at all */
     memset(info, 0, 24);
     memcpy(info, &game, 8);
     memcpy((char *)info + 16, &L, 8);

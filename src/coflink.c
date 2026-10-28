@@ -14,7 +14,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.8"
+#define VERSION "0.8.1"
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
 #define SPACEWAR_APPID 480
@@ -269,17 +269,19 @@ static int g_nrejected;
 /* Direct discovery: "are you hosting?" ('Q') to friends running CoFLink;
    a host answers 'L' + lobby id, only to people on its friends list. */
 typedef struct { u64 friend_, lobby, at, asked; } Answer;
-static Answer g_ans[32];
+#define NANS 256
+static Answer g_ans[NANS];
 
 static Answer *answer_for(u64 friend_, bool make)
 {
-    int free_ = -1;
-    for (int i = 0; i < 32; i++) {
+    int free_ = -1, oldest = 0;
+    for (int i = 0; i < NANS; i++) {
         if (g_ans[i].friend_ == friend_) return &g_ans[i];
         if (!g_ans[i].friend_ && free_ < 0) free_ = i;
+        if (g_ans[i].asked < g_ans[oldest].asked) oldest = i;
     }
     if (!make) return 0;
-    if (free_ < 0) free_ = (int)(now_ms() % 32);
+    if (free_ < 0) free_ = oldest; /* full: reuse the one asked longest ago */
     memset(&g_ans[free_], 0, sizeof g_ans[free_]);
     g_ans[free_].friend_ = friend_;
     return &g_ans[free_];
@@ -479,7 +481,11 @@ static void handle_cb(int cb, uint8_t *p, int size)
         break;
     }
     case CB_NetMsgSessionFailed:
-        say("(Steam: a connection attempt failed; it will retry.)");
+        /* Asking friends who don't run CoFLink fails quietly; only report
+           trouble reaching the host. (The callback starts with the remote
+           identity.) */
+        if (g_host && size >= 16 && S.Ident_GetSteamID64(p) == g_host)
+            say("(Steam: a connection attempt to the host failed; it will retry.)");
         break;
     default:
         break;
@@ -526,9 +532,14 @@ static u64 g_refresh_at;
 
 static int scan_for_host(bool verbose)
 {
-    /* Two ways to see a hosting friend, because Steam doesn't always fill in
-       the first: (1) the lobby in their "game played" info, (2) the
-       "+connect_lobby <id>" their CoFLink puts in its Steam rich presence. */
+    /* Ways to see a hosting friend: (1) the lobby in their "game played" info,
+       (2) the "+connect_lobby <id>" their CoFLink puts in its rich presence -
+       both only while Steam shows them in CoFLink ("Spacewar"). Once the host
+       starts Cry of Fear, Steam shows "playing Cry of Fear" instead and both
+       go blank, so (3) CoFLink asks friends' CoFLink directly: every few
+       seconds for friends in Spacewar or Cry of Fear, and every online friend
+       when Refresh is clicked (or every 30 s). Only a host answers, and only
+       to people on its own friends list. */
     static u64 noted[32];
     static int nnoted;
     static UiPerson found[32];
@@ -536,25 +547,33 @@ static int scan_for_host(bool verbose)
     for (int i = 0; i < total && n < 32; i++) {
         u64 id = S.Friends_GetFriendByIndex(F, i, FRIEND_IMMEDIATE);
         uint8_t info[32] = { 0 };
-        if (!S.Friends_GetFriendGamePlayed(F, id, info)) continue;
-        u64 game = rd64(info), lob = rd64(info + 16);
-        if ((game & 0xFFFFFF) != SPACEWAR_APPID) continue;
+        bool playing = S.Friends_GetFriendGamePlayed(F, id, info);
+        uint32_t app = playing ? (uint32_t)(rd64(info) & 0xFFFFFF) : 0;
+        bool in_coflink = app == SPACEWAR_APPID, in_cof = app == COF_APPID;
+        u64 lob = in_coflink ? rd64(info + 16) : 0;
         u64 t = now_ms();
-        if (!lob) { /* 2nd way: the lobby in their Steam rich presence */
+        if (!lob && in_coflink) { /* 2nd way: the lobby in their Steam rich presence */
             S.Friends_RequestFriendRichPresence(F, id);
             const char *rp = S.Friends_GetFriendRichPresence(F, id, "connect");
             const char *c = rp ? strstr(rp, "+connect_lobby ") : 0;
             if (c) lob = str_to_u64(c + 15);
         }
         if (!lob) { /* 3rd way: ask their CoFLink directly */
-            Answer *a = answer_for(id, true);
-            if (a->lobby && t - a->at < 15000) lob = a->lobby;
-            else if (!a->asked || t - a->asked > 4000) {
-                static const char q[2] = { 'Q', PROTO[0] };
-                send_ctl_data(id, q, 2);
-                a->asked = t;
+            Answer *a = answer_for(id, false);
+            if (a && a->lobby && t - a->at < 15000) {
+                lob = a->lobby;
+            } else if (S.Friends_GetFriendPersonaState(F, id) != 0) { /* online */
+                u64 every = (in_coflink || in_cof) ? 4000 : 30000;
+                if (g_refresh == 1) every = 0; /* Refresh: ask everyone now */
+                if (!a) a = answer_for(id, true);
+                if (!a->asked || t - a->asked > every) {
+                    static const char q[2] = { 'Q', PROTO[0] };
+                    send_ctl_data(id, q, 2);
+                    a->asked = t;
+                }
             }
         }
+        if (!lob && !in_coflink) continue;
         if (!lob) {
             bool seen = false;
             for (int k = 0; k < nnoted; k++) seen |= noted[k] == id;
@@ -1021,7 +1040,7 @@ static void handle_cmd(const Cmd *c)
         say("Refreshing...");
         g_nrejected = 0;               /* offer hosts you said no to again */
         g_last_found_n = -1;           /* and say who is hosting, even if unchanged */
-        for (int i = 0; i < 32; i++) g_ans[i].asked = 0; /* ask friends' CoFLink again now */
+        for (int i = 0; i < NANS; i++) g_ans[i].asked = 0; /* ask friends' CoFLink again now */
         g_refresh = 1;
         break;
     case CMD_STATUS: print_status(); break;
