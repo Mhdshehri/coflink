@@ -24,6 +24,13 @@ IMP HANDLE WINAPI CreateToolhelp32Snapshot(DWORD flags, DWORD pid);
 IMP BOOL WINAPI Process32First(HANDLE snap, void *entry);
 IMP BOOL WINAPI Process32Next(HANDLE snap, void *entry);
 IMP BOOL WINAPI CloseHandle(HANDLE h);
+IMP DWORD WINAPI GetFileAttributesA(const char *path);
+typedef struct { DWORD cb; char *reserved, *desktop, *title; DWORD x, y, w, h, cx, cy, fill, flags;
+                 uint16_t show, reserved2; void *reserved3; HANDLE in, out, err; } StartupInfoA; /* 68 bytes */
+typedef struct { HANDLE process, thread; DWORD pid, tid; } ProcInfo;
+IMP BOOL WINAPI CreateProcessA(const char *app, char *cmd, void *pa, void *ta, BOOL inherit, DWORD flags,
+                               void *env, const char *dir, StartupInfoA *si, ProcInfo *pi);
+IMP long WINAPI RegGetValueA(void *key, const char *sub, const char *value, DWORD flags, DWORD *type, void *data, DWORD *size);
 IMP BOOL WINAPI OpenClipboard(HANDLE w);
 IMP BOOL WINAPI EmptyClipboard(void);
 IMP HANDLE WINAPI SetClipboardData(UINT fmt, HANDLE h);
@@ -196,6 +203,38 @@ bool process_running(const char *exe_name)
     }
     CloseHandle(snap);
     return found;
+}
+
+bool file_exists(const char *path)
+{
+    DWORD a = GetFileAttributesA(path);
+    return a != 0xFFFFFFFFu && !(a & 0x10 /* directory */);
+}
+
+bool run_program(const char *exe, const char *args, const char *dir)
+{
+    static char cmd[1400];
+    sfmt(cmd, sizeof cmd, "\"%s\" %s", exe, args);
+    StartupInfoA si;
+    memset(&si, 0, sizeof si);
+    si.cb = sizeof si;
+    ProcInfo pi;
+    memset(&pi, 0, sizeof pi);
+    if (!CreateProcessA(exe, cmd, 0, 0, 0, 0, 0, dir, &si, &pi)) return false;
+    CloseHandle(pi.thread);
+    CloseHandle(pi.process);
+    return true;
+}
+
+bool steam_install_path(char *out, int n)
+{
+    DWORD size = (DWORD)n;
+    /* HKEY_CURRENT_USER\Software\Valve\Steam  SteamPath  (REG_SZ) */
+    if (RegGetValueA((void *)(uintptr_t)0x80000001u, "Software\\Valve\\Steam", "SteamPath", 2 /* RRF_RT_REG_SZ */,
+                     0, out, &size) != 0)
+        return false;
+    out[n - 1] = 0;
+    return out[0] != 0;
 }
 
 void open_url(const char *url) { ShellExecuteA(0, "open", url, 0, 0, 1); }

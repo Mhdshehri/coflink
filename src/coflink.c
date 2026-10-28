@@ -12,7 +12,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.4"
+#define VERSION "0.5"
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
 #define SPACEWAR_APPID 480
@@ -33,7 +33,7 @@
 #define SLOT_SOCKS 8
 #define CONNECT_TRIES 6
 
-static void *U, *F, *MM, *NM, *NU;
+static void *U, *F, *MM, *NM, *NU, *AP;
 static int32_t g_pipe;
 static u64 g_me, g_lobby, g_host, g_joining;
 static int g_mode;      /* MODE_IDLE / MODE_HOST / MODE_JOIN */
@@ -853,6 +853,100 @@ static void join_tick(void)
     if (!g_no_launch) auto_connect(t);
 }
 
+/* ---------- starting Cry of Fear without its launcher ---------- */
+
+/* Cry of Fear's launcher (CoFLaunchApp.exe) is skipped: cof.exe is started
+   directly with the options the Cry of Fear server browser uses. */
+#define COF_ARGS "-basedir cryoffear -game cryoffear -hw -heapsize 1536000"
+
+static char *read_small_file(const char *path, int *len)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    char *b = malloc(65537);
+    if (!b) { fclose(f); return 0; }
+    int n = (int)fread(b, 1, 65536, f);
+    fclose(f);
+    b[n < 0 ? 0 : n] = 0;
+    *len = n;
+    return b;
+}
+
+/* Next "key" "value" pair whose key matches, from position *pos. Handles \\ escapes. */
+static bool vdf_value(const char *t, int *pos, const char *key, char *out, int n)
+{
+    char pat[48];
+    sfmt(pat, sizeof pat, "\"%s\"", key);
+    const char *k = strstr(t + *pos, pat);
+    if (!k) return false;
+    const char *v = strchr(k + strlen(pat), '"');
+    if (!v) return false;
+    v++;
+    int o = 0;
+    while (*v && *v != '"' && o < n - 1) {
+        if (*v == '\\' && v[1]) v++;
+        out[o++] = *v++;
+    }
+    out[o] = 0;
+    *pos = (int)(v - t);
+    return o > 0;
+}
+
+static bool cof_in(const char *dir)
+{
+    char exe[700];
+    sfmt(exe, sizeof exe, "%s" PATHSEP "cof.exe", dir);
+    return dir[0] && file_exists(exe);
+}
+
+/* Find the Cry of Fear folder: ask Steam, else read Steam's library list. */
+static bool find_cof_dir(char *out, int n)
+{
+    if (AP && S.Apps_GetAppInstallDir && S.Apps_GetAppInstallDir(AP, COF_APPID, out, (uint32_t)n) > 0 && cof_in(out))
+        return true;
+    char steam[600], path[700], lib[600];
+    if (!steam_install_path(steam, sizeof steam)) return false;
+    sfmt(path, sizeof path, "%s" PATHSEP "steamapps" PATHSEP "libraryfolders.vdf", steam);
+    int len = 0;
+    char *vdf = read_small_file(path, &len);
+    int pos = 0;
+    bool found = false;
+    for (int i = 0; i < 32 && !found; i++) {
+        if (i == 0) sfmt(lib, sizeof lib, "%s", steam);              /* Steam's own library */
+        else if (!vdf || !vdf_value(vdf, &pos, "path", lib, sizeof lib)) break;
+        sfmt(path, sizeof path, "%s" PATHSEP "steamapps" PATHSEP "appmanifest_%d.acf", lib, COF_APPID);
+        int alen = 0;
+        char *acf = read_small_file(path, &alen);
+        char inst[256];
+        int apos = 0;
+        if (acf && vdf_value(acf, &apos, "installdir", inst, sizeof inst)) {
+            sfmt(out, n, "%s" PATHSEP "steamapps" PATHSEP "common" PATHSEP "%s", lib, inst);
+            found = cof_in(out);
+        }
+        free(acf);
+    }
+    free(vdf);
+    return found;
+}
+
+static void start_game(void)
+{
+    if (process_running("cof.exe")) { say("Cry of Fear is already running."); return; }
+    char dir[600], exe[700];
+    if (g_steam_ok && find_cof_dir(dir, sizeof dir)) {
+        sfmt(exe, sizeof exe, "%s" PATHSEP "cof.exe", dir);
+        if (run_program(exe, COF_ARGS, dir)) {
+            say("Starting Cry of Fear (the game itself, without its launcher)...");
+            return;
+        }
+        say("! Could not start %s.", exe);
+    } else {
+        say("(Couldn't find the Cry of Fear folder.)");
+    }
+    open_url("steam://run/223710");
+    say("Starting Cry of Fear through Steam instead...");
+}
+
 /* ---------- modes ---------- */
 
 static bool steam_start(void);
@@ -967,8 +1061,7 @@ static void handle_cmd(const Cmd *c)
         break;
     case CMD_INVITE: invite(c->arg); break;
     case CMD_LAUNCH: /* "Start Cry of Fear" */
-        open_url("steam://run/223710");
-        say("Starting Cry of Fear...");
+        start_game();
         break;
     case CMD_CONNECT: /* "Connect game": try again now */
         if (g_mode != MODE_JOIN || !g_lobby) { say("! Join a friend's lobby first."); break; }
@@ -1068,6 +1161,7 @@ static bool steam_start(void)
     MM = S.SteamMatchmaking();
     NM = S.SteamNetMsgs();
     NU = S.SteamNetUtils();
+    AP = S.SteamApps();
     if (!U || !F || !MM || !NM || !NU) { say("! Steam interfaces unavailable."); return false; }
     if (!S.User_BLoggedOn(U)) { say("! Steam is in offline mode. Go online and try again."); S.Shutdown(); return false; }
     g_me = S.User_GetSteamID(U);

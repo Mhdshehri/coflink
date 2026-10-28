@@ -4,7 +4,7 @@ Play **Cry of Fear** co-op with a Steam friend: no VPN (no Hamachi or Radmin), n
 
 The host runs the game's own co-op server on their PC. CoFLink carries the game traffic through Steam's relay network, so your friend joins from Steam.
 
-**Download:** grab `CoFLink-0.4.zip` from [Releases](../../releases). Both players unzip it and open `CoFLink.exe`. (Beta: the connection has been played in a real two-player session; the window is new.)
+**Download:** grab `CoFLink-0.5.zip` from [Releases](../../releases). Both players unzip it and open `CoFLink.exe`. (Beta: the connection has been played in a real two-player session; the window is new.)
 
 ## How to play
 
@@ -18,7 +18,7 @@ CoFLink is one program with a simple window for both players.
 **Friend**
 1. Open CoFLink: the host's Steam invite is picked up by itself. Or click **Join a friend** and pick the host
    (or paste the host's lobby id and click **Join this id**).
-2. Start Cry of Fear as usual. CoFLink checks that the host's co-op game answers, waits for
+2. Click **Start Cry of Fear** (runs `cof.exe` directly, skipping the launcher). CoFLink checks that the host's co-op game answers, waits for
    your game's menu to load, then connects it for you (`steam://connect`), retrying if needed.
    Fallback: **Connect game**, or `~` then `Ctrl+V` and Enter.
 
@@ -45,7 +45,7 @@ Host's CoFLink --UDP--> Host's Cry of Fear server (127.0.0.1:27015)
 - Oversized packets and floods are dropped.
 - `steam_api.dll` is Valve's signed redistributable from [Steamworks.NET 2025.164.1](https://github.com/rlabrecque/Steamworks.NET/releases).
   CoFLink checks its SHA-256 (`fdafb7c65ec7d4182b42bf92cc8671c68e4dc547cc6e613899d2618a47eb65da`) and refuses to load any other file.
-- No third-party code: CoFLink.exe imports only core Windows DLLs (kernel32, user32, gdi32, comctl32, shell32, ws2_32, msvcrt) plus the pinned `steam_api.dll`.
+- No third-party code: CoFLink.exe imports only core Windows DLLs (kernel32, advapi32, user32, gdi32, comctl32, shell32, ws2_32, msvcrt) plus the pinned `steam_api.dll`.
 
 ## Building
 
@@ -69,7 +69,7 @@ python3 test/run_tests.py   # prints ALL OK
 
 The engine (`src/coflink.c`) is shared by the window (`src/ui_win.c`) and a text front end (`src/ui_console.c`) that the tests drive.
 
-The tests cover: two friends playing through the relay; packets arriving exact and in order; level-load bursts; latency; strangers being blocked; quit and reconnect; invites; foreign lobbies being refused; join confirmation; discovery through rich presence and by asking a friend's CoFLink directly (host opened first); joining by lobby id; automatic game connect (waits for the host's server and the friend's game); invites accepted from the start screen; the game and Steam's server query sharing the relay; version checks; Steam's server query getting an info reply with Cry of Fear's app id; invites picked up as soon as they arrive; stopping, then switching between hosting and joining; inviting from the friends list; and 10% packet loss.
+The tests cover: two friends playing through the relay; packets arriving exact and in order; level-load bursts; latency; strangers being blocked; quit and reconnect; invites; foreign lobbies being refused; join confirmation; discovery through rich presence and by asking a friend's CoFLink directly (host opened first); joining by lobby id; automatic game connect (waits for the host's server and the friend's game); invites accepted from the start screen; the game and Steam's server query sharing the relay; version checks; Steam's server query getting an info reply with Cry of Fear's app id; invites picked up as soon as they arrive; starting cof.exe directly (folder from Steam or its library list); stopping, then switching between hosting and joining; inviting from the friends list; and 10% packet loss.
 
 ## Credits
 

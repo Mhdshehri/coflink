@@ -29,6 +29,8 @@ typedef struct {
     void *(*SteamMatchmaking)(void);
     void *(*SteamNetMsgs)(void);
     void *(*SteamNetUtils)(void);
+    void *(*SteamApps)(void);
+    uint32_t (*Apps_GetAppInstallDir)(void *self, uint32_t app, char *buf, uint32_t n);
 
     u64 (*User_GetSteamID)(void *self);
     bool (*User_BLoggedOn)(void *self);

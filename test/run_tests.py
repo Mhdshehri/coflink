@@ -554,6 +554,41 @@ def main():
         check("Joined" not in jv2.log and "invited you" not in jv2.log, "an invite from someone who isn't your friend is ignored")
         jv2.stop(); hv.stop()
 
+        print("[19] Start Cry of Fear runs the game itself (cof.exe), not its launcher")
+        g1 = os.path.join(d, "steamlib1", "Cry of Fear"); os.makedirs(g1)
+        open(os.path.join(g1, "cof.exe"), "w").close()
+        open(os.path.join(g1, "CoFLaunchApp.exe"), "w").close()
+        def launch_log(env):
+            e = dict(os.environ, **base, MOCK_ID="1121", MOCK_FRIENDS="", ASAN_OPTIONS="detect_leaks=0", **env)
+            q = subprocess.Popen([BIN, "idle", "--no-launch"], env=e, stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            time.sleep(1.0)
+            q.stdin.write("G\n"); q.stdin.flush()
+            time.sleep(1.5)
+            q.send_signal(signal.SIGINT)
+            out, _ = q.communicate(timeout=5)
+            return out
+        out = launch_log({"MOCK_COF_DIR": g1})
+        want = f"would run {g1}/cof.exe -basedir cryoffear -game cryoffear -hw -heapsize 1536000 (in {g1})"
+        check(want in out, "folder from Steam: runs cof.exe with the game options, in the game folder")
+        check("CoFLaunchApp" not in out and "steam://run" not in out, "the launcher is not used")
+        # Steam doesn't say: find it in Steam's library list (a second library, like D:\\SteamLibrary)
+        steam = os.path.join(d, "Steam"); lib2 = os.path.join(d, "Lib Two")
+        os.makedirs(os.path.join(steam, "steamapps")); os.makedirs(os.path.join(lib2, "steamapps", "common", "Cry of Fear"))
+        open(os.path.join(lib2, "steamapps", "common", "Cry of Fear", "cof.exe"), "w").close()
+        with open(os.path.join(steam, "steamapps", "libraryfolders.vdf"), "w") as f:
+            f.write('"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t\t"apps"\n\t\t{\n\t\t\t"223710"\t\t"1"\n\t\t}\n\t}\n}\n' % (steam, lib2))
+        with open(os.path.join(lib2, "steamapps", "appmanifest_223710.acf"), "w") as f:
+            f.write('"AppState"\n{\n\t"appid"\t\t"223710"\n\t"name"\t\t"Cry of Fear"\n\t"installdir"\t\t"Cry of Fear"\n}\n')
+        out = launch_log({"MOCK_STEAM_PATH": steam})
+        g2 = os.path.join(lib2, "steamapps", "common", "Cry of Fear")
+        check(f"would run {g2}/cof.exe -basedir cryoffear" in out, "found through Steam's library list (second drive)")
+        out = launch_log({})
+        check("Couldn't find the Cry of Fear folder" in out and "would open steam://run/223710" in out,
+              "game folder not found: falls back to starting it through Steam")
+        out = launch_log({"MOCK_COF_DIR": g1, "MOCK_COF": "1"})
+        check("Cry of Fear is already running" in out and "would run" not in out, "doesn't start a second copy")
+
         print("[8] bad internet: 10% of packets lost each way")
         h3 = Proc("H3", dict(base, MOCK_ID="1021", MOCK_FRIENDS="1022", MOCK_LOSS="10"), ["host"])
         j3 = Proc("J3", dict(base, MOCK_ID="1022", MOCK_FRIENDS="1021", MOCK_LOSS="10"), ["join", "--no-launch", "--yes"])

@@ -69,6 +69,7 @@ bool ui_poll(Cmd *c)
     case 's': case 'S': c->kind = CMD_STATUS; break;
     case 'x': case 'X': c->kind = CMD_STOP; break;
     case 'c': case 'C': c->kind = CMD_CONNECT; break;
+    case 'g': case 'G': c->kind = CMD_LAUNCH; break;
     case 'h': case 'H': c->kind = CMD_HOST; break;
     case 'j': case 'J': c->kind = CMD_JOIN; break;
     case 'l': case 'L':

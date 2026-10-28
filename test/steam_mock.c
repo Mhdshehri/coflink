@@ -462,6 +462,14 @@ static void m_SetSteamID64(void *id, u64 v) { int32_t t = 16, sz = 8; memcpy(id,
 static u64 m_GetSteamID64(void *id) { int32_t t; memcpy(&t, id, 4); if (t != 16) return 0; u64 v; memcpy(&v, (char *)id + 8, 8); return v; }
 static void m_Release(void *m) { Msg *x = m; free(x->data); free(x); }
 static int m_InitRelay(void *s) { (void)s; return 1; }
+static uint32_t m_GetAppInstallDir(void *s, uint32_t app, char *buf, uint32_t n)
+{
+    (void)s;
+    const char *e = getenv("MOCK_COF_DIR"); /* where Steam says Cry of Fear is */
+    if (app != 223710 || !e || !n) return 0;
+    snprintf(buf, n, "%s", e);
+    return (uint32_t)strlen(buf) + 1;
+}
 
 const char *steam_load(void)
 {
@@ -469,7 +477,8 @@ const char *steam_load(void)
     S.GetHSteamPipe = m_GetHSteamPipe; S.MD_Init = m_MD_Init; S.MD_RunFrame = m_MD_RunFrame;
     S.MD_GetNextCallback = m_MD_GetNextCallback; S.MD_FreeLastCallback = m_MD_FreeLastCallback;
     S.MD_GetAPICallResult = m_MD_GetAPICallResult;
-    S.SteamUser = S.SteamFriends = S.SteamMatchmaking = S.SteamNetMsgs = S.SteamNetUtils = m_iface;
+    S.SteamUser = S.SteamFriends = S.SteamMatchmaking = S.SteamNetMsgs = S.SteamNetUtils = S.SteamApps = m_iface;
+    S.Apps_GetAppInstallDir = m_GetAppInstallDir;
     S.User_GetSteamID = m_GetSteamID; S.User_BLoggedOn = m_BLoggedOn;
     S.Friends_GetPersonaName = m_GetPersonaName; S.Friends_GetFriendCount = m_GetFriendCount;
     S.Friends_GetFriendByIndex = m_GetFriendByIndex; S.Friends_GetFriendPersonaState = m_GetFriendPersonaState;
