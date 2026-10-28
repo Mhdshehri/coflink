@@ -1,10 +1,12 @@
 /* CoFLink - play Cry of Fear co-op with a Steam friend: no VPN, no port forwarding.
  *
  * Host:  creates a friends-only Steam lobby (through Valve's free "Spacewar"
- *        test app, AppID 480), invites friends, and forwards each friend's
+ *        test app, AppID 480) and forwards each friend's
  *        packets into the host's own Cry of Fear co-op server on 127.0.0.1:27015.
- * Join:  finds the host (friend list or Steam invite), joins the lobby, and
- *        opens 127.0.0.1:27115 for the friend's Cry of Fear to connect to.
+ * Join:  finds the host among Steam friends (or by lobby id), joins the lobby,
+ *        and opens 127.0.0.1:27115; the friend then connects from Cry of Fear's
+ *        own console (connect 127.0.0.1:27115). CoFLink only links; it does not
+ *        connect the game itself and does not use Steam invites.
  * Packets travel through Steam's relay network (ISteamNetworkingMessages).
  * The game is not modified. Pattern: coop-anything HXCoop relay
  * (playbook/networking-steam-spacewar.md). MIT license. */
@@ -12,7 +14,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.5"
+#define VERSION "0.6"
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
 #define SPACEWAR_APPID 480
@@ -31,7 +33,6 @@
 #define NSLOT 4
 #define SLOT_PROBE 7           /* CoFLink's own "is the host's server up?" check */
 #define SLOT_SOCKS 8
-#define CONNECT_TRIES 6
 
 static void *U, *F, *MM, *NM, *NU, *AP;
 static int32_t g_pipe;
@@ -45,9 +46,7 @@ static uint16_t g_local_port_base = 27115;
 static int g_max_players = 4;
 static bool g_no_launch;
 static uint8_t g_buf[BUF_SIZE];
-static uint8_t g_fix[2048];
-static bool g_said_fixed;
-int a2s_fix_appid(const uint8_t *in, int n, uint8_t *out, int cap, uint32_t appid);
+
 
 /* ---------- output ---------- */
 
@@ -126,6 +125,8 @@ static void send_ctl(u64 to, char c)
     char m[2] = { c, PROTO[0] }; /* command + protocol version */
     S.NM_SendMessageToUser(NM, id, m, 2, SEND_RELIABLE | SEND_NONAGLE, CH_CTL);
 }
+
+static void on_probe_reply(const uint8_t *b, int len);
 
 static void send_ctl_data(u64 to, const void *p, int n)
 {
@@ -249,10 +250,9 @@ static uint16_t g_slot_port[NSLOT];  /* local source port using each slot */
 static u64 g_slot_used[NSLOT];
 static bool g_welcomed, g_host_warned, g_said_down, g_warned_no_answer;
 static u64 g_host_last, g_last_hello, g_last_ka, g_up, g_down, g_first_up_ms;
-/* automatic connect: host's server answers + the friend's Cry of Fear runs */
-static bool g_server_ready, g_said_wait_server, g_said_start_game, g_said_manual, g_cof_running;
-static u64 g_last_probe, g_welcomed_ms, g_cof_seen_ms, g_last_cof_check, g_last_connect;
-static int g_connect_tries;
+/* CoFLink checks the host's co-op server answers, to tell the friend when to connect */
+static bool g_server_ready, g_said_wait_server, g_said_ready;
+static u64 g_last_probe, g_welcomed_ms;
 static u64 g_rejected[16];
 static int g_nrejected;
 /* Direct discovery: "are you hosting?" ('Q') to friends running CoFLink;
@@ -276,9 +276,8 @@ static Answer *answer_for(u64 friend_, bool make)
 
 static void reset_connect_state(void)
 {
-    g_server_ready = g_said_wait_server = g_said_start_game = g_said_manual = g_cof_running = false;
-    g_last_probe = g_welcomed_ms = g_cof_seen_ms = g_last_cof_check = g_last_connect = 0;
-    g_connect_tries = 0;
+    g_server_ready = g_said_wait_server = g_said_ready = false;
+    g_last_probe = g_welcomed_ms = 0;
 }
 
 static void reset_join_state(void)
@@ -330,9 +329,10 @@ static void joined_message(void)
     sfmt(cmd, sizeof cmd, "connect 127.0.0.1:%u", (unsigned)g_local_port);
     clipboard_set(cmd);
     say("");
-    say("=== Start Cry of Fear the normal way (from Steam) ===");
-    say("CoFLink connects it to %s by itself once their co-op game is up.", who(g_host));
-    say("(By hand, if ever needed: press ~ in the game, then Ctrl+V and Enter:  %s )", cmd);
+    say("=== Linked to %s. Now join from the game: ===", who(g_host));
+    say("1. Click \"Start Cry of Fear\" (or start it from Steam).");
+    say("2. In the main menu press ~ to open the console.");
+    say("3. Paste with Ctrl+V and press Enter (already copied):   %s", cmd);
     say("");
 }
 
@@ -400,46 +400,28 @@ static void on_lobby_created(int32_t result, u64 lobby)
     say("=== Lobby is ready (id %s, copied to clipboard) ===", idstr(lobby));
     say("1. Start Cry of Fear and create your co-op server as usual (Co-op -> Create game).");
     say("   In the console (~) type:  sv_lan 1   (your friends will look like LAN players)");
-    say("2. Your friend opens CoFLink and clicks \"Join a friend\" (or accepts your invite),");
-    say("   then starts Cry of Fear - CoFLink connects their game to yours by itself.");
-    say("   If it doesn't: invite them (pick them under Friends online -> Invite),");
-    say("   or send them the lobby id above to paste into their CoFLink.");
+    say("2. Your friend opens CoFLink and clicks \"Join a friend\" (if you don't show up,");
+    say("   send them the lobby id above to paste into their CoFLink).");
+    say("   Once linked, they connect from their game's console:  connect 127.0.0.1:27115");
     say("");
 }
 
-static void publish_friends(void)
+/* Host: the friends linked through CoFLink right now (shown in the window). */
+static void publish_connected(void)
 {
-    static UiPerson list[200];
-    int n = 0, total = S.Friends_GetFriendCount(F, FRIEND_IMMEDIATE);
-    for (int i = 0; i < total && n < 200; i++) {
-        u64 id = S.Friends_GetFriendByIndex(F, i, FRIEND_IMMEDIATE);
-        if (S.Friends_GetFriendPersonaState(F, id) == 0) continue; /* offline */
-        list[n].id = id;
+    static UiPerson list[MAX_PEERS];
+    int n = 0;
+    for (int i = 0; i < g_npeers; i++) {
+        list[n].id = g_peers[i].id;
         list[n].lobby = 0;
-        sfmt(list[n].name, UI_NAME, "%s", who(id));
+        sfmt(list[n].name, UI_NAME, "%s%s", who(g_peers[i].id), g_peers[i].down ? "  (in game)" : "  (linked)");
         n++;
     }
     ui_list(LIST_FRIENDS_ONLINE, n, list);
 }
 
-static void invite(u64 id)
-{
-    if (!g_is_host || !g_lobby) { say("! Start hosting first, then invite."); return; }
-    if (S.MM_InviteUserToLobby(MM, g_lobby, id))
-        say("Invite sent to %s. They open CoFLink, then accept the invite in Steam.", who(id));
-    else
-        say("! Steam would not send the invite.");
-}
-
 /* ---------- callbacks ---------- */
 
-static void start_mode(int mode);
-static void accept_lobby(u64 lobby)
-{
-    if (!lobby) return;
-    if (g_mode != MODE_JOIN) start_mode(MODE_JOIN);
-    if (g_mode == MODE_JOIN) { g_joining = 0; request_join(lobby); }
-}
 
 static u64 rd64(const uint8_t *p) { u64 v; memcpy(&v, p, 8); return v; }
 static uint32_t rd32(const uint8_t *p) { uint32_t v; memcpy(&v, p, 4); return v; }
@@ -471,36 +453,12 @@ static void handle_cb(int cb, uint8_t *p, int size)
         break;
     }
     case CB_LobbyInvite:
-        /* An invite just arrived. From a Steam friend, while CoFLink is open
-           and not hosting or already in a game: join right away. */
-        if (size >= 16) {
-            u64 from = rd64(p), lob = rd64(p + 8);
-            if (!S.Friends_HasFriend(F, from, FRIEND_IMMEDIATE)) break;
-            if (g_is_host) { say("%s invited you, but you are hosting. Click Stop, then accept the invite in Steam.", who(from)); break; }
-            if (g_lobby || g_joining) { say("%s invited you, but you are already in a game. Click Stop first to switch.", who(from)); break; }
-            say("%s invited you - joining their game.", who(from));
-            accept_lobby(lob);
-        }
-        break;
     case CB_GameLobbyJoinRequested:
-        /* The player accepted a Steam invite (or clicked Join Game): that is
-           their yes, so join from any screen - unless they are hosting. */
-        if (size >= 16) {
-            if (g_is_host) { say("Got a Steam invite, but you are hosting. Click Stop first, then accept it again."); break; }
-            say("Accepted invite from %s.", who(rd64(p + 8)));
-            accept_lobby(rd64(p));
-        }
+    case CB_GameRichPresenceJoinRequested:
+        /* Steam invites / "Join Game" are not used: they caused trouble. */
+        if (!g_is_host && !g_lobby)
+            say("(Steam invites aren't used. Click \"Join a friend\" to link with the host.)");
         break;
-    case CB_GameRichPresenceJoinRequested: {
-        if (size < 9) break;
-        char conn[257] = { 0 };
-        memcpy(conn, p + 8, (size_t)(size - 8 < 256 ? size - 8 : 256));
-        const char *c = strstr(conn, "+connect_lobby ");
-        if (!c) break;
-        if (g_is_host) { say("You are hosting. Click Stop first to join someone else."); break; }
-        accept_lobby(str_to_u64(c + 15));
-        break;
-    }
     case CB_NetMsgSessionRequest: {
         u64 from = S.Ident_GetSteamID64(p);
         bool ok = g_is_host ? true /* data is checked against the lobby */
@@ -606,7 +564,7 @@ static void scan_for_host(bool verbose)
     if (pick) request_join(pick);
     else if (!n && verbose) {
         say("No friend is hosting yet. Waiting...");
-        say("  Or: accept the host's Steam invite, or paste their lobby id.");
+        say("  Or: paste the host's lobby id.");
     }
 }
 
@@ -642,19 +600,8 @@ static void drain_steam(void)
             } else if (from == g_host && rate_ok(&g_host_rate, now_ms())) {
                 g_host_last = now_ms();
                 if (slot == SLOT_PROBE) {
-                    if (!g_server_ready) {
-                        g_server_ready = true;
-                        say("%s's Cry of Fear co-op game is up.", who(g_host));
-                    }
+                    on_probe_reply(body, len);
                 } else if (g_slot_port[slot]) {
-                    /* Steam checks the server's info reply before connecting the
-                       game; give it Cry of Fear's app id (only info replies change). */
-                    int fixed = a2s_fix_appid(body, len, g_fix, (int)sizeof g_fix, COF_APPID);
-                    if (fixed > 0) {
-                        body = g_fix;
-                        len = fixed;
-                        if (!g_said_fixed) { g_said_fixed = true; say("(Gave Steam the server's game id, so it lets the game connect.)"); }
-                    }
                     udp_sendto(g_game_sock, body, len, g_game_ip, g_slot_port[slot]);
                     g_server_ready = true;
                     if (!g_down++ && !g_said_down) {
@@ -758,65 +705,50 @@ static int slot_for(uint16_t port, u64 t)
     return lru;
 }
 
-static void probe_server(void)
+static void probe_server(const uint8_t *challenge)
 {
     /* A standard server-info query ("is your game server up?"), sent to the
-       host's own Cry of Fear server through the relay. Any answer means yes. */
-    static const char q[] = "\xFF\xFF\xFF\xFFTSource Engine Query";
-    send_game(g_host, SLOT_PROBE, q, (int)sizeof q); /* includes the final 0 */
+       host's own Cry of Fear server through the relay. Any answer means yes.
+       The old form (no challenge) is what Cry of Fear's server answers; a newer
+       server that replies with a challenge gets asked again with it. */
+    uint8_t q[32] = "\xFF\xFF\xFF\xFFTSource Engine Query";
+    int n = 25; /* includes the final 0 */
+    if (challenge) { memcpy(q + 25, challenge, 4); n = 29; }
+    send_game(g_host, SLOT_PROBE, q, n);
 }
 
-static void connect_game(void)
+/* An answer to CoFLink's own check arrived from the host's server. */
+static void on_probe_reply(const uint8_t *b, int len)
 {
-    char url[64];
-    sfmt(url, sizeof url, "steam://connect/127.0.0.1:%u", (unsigned)g_local_port);
-    g_connect_tries++;
-    g_last_connect = now_ms();
-    say("Connecting your Cry of Fear to %s... (try %d)", who(g_host), g_connect_tries);
-    open_url(url);
+    if (len >= 9 && b[0] == 0xFF && b[1] == 0xFF && b[2] == 0xFF && b[3] == 0xFF && b[4] == 'A') {
+        probe_server(b + 5); /* server wants its challenge back */
+        return;
+    }
+    if (!g_server_ready) {
+        g_server_ready = true;
+        say("%s's Cry of Fear co-op game is up.", who(g_host));
+    }
 }
 
-/* Join side, once connected to the host: wait for the host's co-op server to
-   answer and for the friend's Cry of Fear to be running, then tell the game to
-   connect. Cry of Fear loads its 3D menu after starting, which cancels an early
-   connect, so CoFLink waits a few seconds and retries until game data flows. */
-static void auto_connect(u64 t)
+/* Join side: say when the host's co-op game is up, so the friend knows to
+   connect from Cry of Fear's console. CoFLink never connects the game itself. */
+static void join_hints(u64 t)
 {
     if (!g_welcomed) return;
     if (!g_welcomed_ms) g_welcomed_ms = t;
     if (!g_server_ready) {
-        if (t - g_last_probe > 2000) { probe_server(); g_last_probe = t; }
         if (!g_said_wait_server && t - g_welcomed_ms > 5000) {
             g_said_wait_server = true;
             say("Waiting for %s to start their co-op game in Cry of Fear...", who(g_host));
         }
         return;
     }
-    if (g_down >= 50) return; /* playing: the game is connected */
-    if (!g_last_cof_check || t - g_last_cof_check > 1000) {
-        g_last_cof_check = t;
-        bool running = process_running("cof.exe");
-        if (running && !g_cof_running) { g_cof_seen_ms = t; say("Cry of Fear is running."); }
-        if (!running) g_cof_seen_ms = 0;
-        g_cof_running = running;
-    }
-    if (!g_cof_running) {
-        if (!g_said_start_game) {
-            g_said_start_game = true;
-            say("Now start Cry of Fear (from Steam, as usual). CoFLink will connect it to %s.", who(g_host));
-        }
-        return;
-    }
-    if (g_connect_tries < CONNECT_TRIES && t - g_cof_seen_ms > 8000 &&
-        (!g_connect_tries || t - g_last_connect > 10000)) {
-        connect_game();
-    } else if (g_connect_tries >= CONNECT_TRIES && !g_said_manual && t - g_last_connect > 10000) {
-        g_said_manual = true;
+    if (!g_said_ready && g_down < 50) {
+        g_said_ready = true;
         char cmd[64];
         sfmt(cmd, sizeof cmd, "connect 127.0.0.1:%u", (unsigned)g_local_port);
         clipboard_set(cmd);
-        say("! The game didn't connect by itself. In Cry of Fear press ~, then Ctrl+V and Enter");
-        say("  (copied:  %s ), or click \"Connect game\" to try again.", cmd);
+        say("Ready: in Cry of Fear press ~, then Ctrl+V and Enter  (%s)", cmd);
     }
 }
 
@@ -829,8 +761,8 @@ static void join_tick(void)
         int r = udp_recvfrom(g_game_sock, g_buf, BUF_SIZE, &ip, &port);
         if (r < 0) break;
         if (r == 0 || r > MAX_GAME_PKT || !g_lobby) continue;
-        bool first = !g_up;
         g_game_ip = ip;
+        bool first = !g_up;
         int slot = slot_for(port, t);
         if (first) say("Cry of Fear is talking to CoFLink. Passing it to %s...", who(g_host));
         if (!g_up++) g_first_up_ms = t;
@@ -838,6 +770,11 @@ static void join_tick(void)
     }
     if (!g_lobby) return;
     if (!g_welcomed && t - g_last_hello > 2000) { send_ctl(g_host, 'H'); g_last_hello = t; }
+    /* check the host's co-op server answers (every 2 s until it does) */
+    if (g_welcomed && !g_server_ready && t - g_last_probe > 2000) {
+        probe_server(0);
+        g_last_probe = t;
+    }
     if (t - g_last_ka >= KEEPALIVE_MS) { send_ctl(g_host, 'K'); g_last_ka = t; }
     if (t - g_host_last > HOST_QUIET_MS && !g_host_warned) {
         g_host_warned = true;
@@ -850,7 +787,7 @@ static void join_tick(void)
         g_warned_no_answer = true;
         say("! The host's Cry of Fear server isn't answering yet. Ask them to start the co-op server.");
     }
-    if (!g_no_launch) auto_connect(t);
+    join_hints(t);
 }
 
 /* ---------- starting Cry of Fear without its launcher ---------- */
@@ -1023,10 +960,9 @@ static void make_status(UiState *st)
         else if (!g_lobby) sfmt(st->status, sizeof st->status, "Looking for a friend who is hosting...");
         else if (g_down >= 50) sfmt(st->status, sizeof st->status, "Playing with %s", who(g_host));
         else if (!g_welcomed) sfmt(st->status, sizeof st->status, "Reaching %s through Steam...", who(g_host));
-        else if (!g_server_ready) sfmt(st->status, sizeof st->status, "Connected - waiting for %s to start their co-op game", who(g_host));
-        else if (g_no_launch) sfmt(st->status, sizeof st->status, "%s's game is up - connect your Cry of Fear", who(g_host));
-        else if (!g_cof_running) sfmt(st->status, sizeof st->status, "%s's game is up - start Cry of Fear now", who(g_host));
-        else sfmt(st->status, sizeof st->status, "Connecting your Cry of Fear to %s...", who(g_host));
+        else if (!g_server_ready) sfmt(st->status, sizeof st->status, "Linked - waiting for %s to start their co-op game", who(g_host));
+        else if (g_up) sfmt(st->status, sizeof st->status, "Your game is connecting to %s...", who(g_host));
+        else sfmt(st->status, sizeof st->status, "Linked to %s - join from the game console (~)", who(g_host));
     }
 }
 
@@ -1059,17 +995,8 @@ static void handle_cmd(const Cmd *c)
         if (g_mode != MODE_JOIN) start_mode(MODE_JOIN);
         if (g_mode == MODE_JOIN) { g_joining = 0; request_join(c->arg); }
         break;
-    case CMD_INVITE: invite(c->arg); break;
     case CMD_LAUNCH: /* "Start Cry of Fear" */
         start_game();
-        break;
-    case CMD_CONNECT: /* "Connect game": try again now */
-        if (g_mode != MODE_JOIN || !g_lobby) { say("! Join a friend's lobby first."); break; }
-        if (!g_server_ready) { say("Waiting for %s's co-op game to answer first...", who(g_host)); break; }
-        if (!process_running("cof.exe")) { say("Start Cry of Fear first - CoFLink connects it as soon as it runs."); break; }
-        g_connect_tries = 0;
-        g_said_manual = false;
-        connect_game();
         break;
     case CMD_STATUS: print_status(); break;
     case CMD_STOP: stop_mode(false); break;
@@ -1085,8 +1012,8 @@ void engine_run(const EngineOpts *o, Cmd first)
     g_max_players = o->max_players >= 2 && o->max_players <= 8 ? o->max_players : 4;
     g_no_launch = o->no_launch;
     say("CoFLink " VERSION " - Cry of Fear co-op over Steam (no VPN, no port forwarding)");
-    /* Connect to Steam right away, so a Steam invite accepted on the start
-       screen reaches CoFLink. If Steam isn't running yet, Host/Join retries. */
+    /* Connect to Steam right away (shows "Signed in as..."). If Steam isn't
+       running yet, Host/Join retries. */
     g_steam_ok = steam_start();
     if (first.kind != CMD_NONE) handle_cmd(&first);
 
@@ -1103,7 +1030,7 @@ void engine_run(const EngineOpts *o, Cmd first)
         if (g_mode != prev_mode) { last_scan = 0; last_friends = 0; prev_mode = g_mode; }
         if (g_mode == MODE_HOST) {
             host_tick();
-            if (g_lobby && (!last_friends || t - last_friends > 5000)) { publish_friends(); last_friends = t; }
+            if (g_lobby && (!last_friends || t - last_friends > 1000)) { publish_connected(); last_friends = t; }
         } else if (g_mode == MODE_JOIN) {
             join_tick();
             if (!g_lobby && !g_joining && (!last_scan || t - last_scan > 3000)) {

@@ -2,7 +2,7 @@
  * tests (Linux, mock Steam); behaves like the old console version:
  *   coflink host [--port N] [--players N]
  *   coflink join [lobby id] [--port N] [--no-launch] [--yes]
- * Keys (one per line on stdin): I invite, L paste lobby id, S status,
+ * Keys (one per line on stdin): L paste lobby id, S status, G start game,
  * X stop, H host, J join, Q quit (the same actions as the window's buttons). */
 #include "ui.h"
 #include "plat.h"
@@ -68,7 +68,6 @@ bool ui_poll(Cmd *c)
     case 'q': case 'Q': c->kind = CMD_QUIT; break;
     case 's': case 'S': c->kind = CMD_STATUS; break;
     case 'x': case 'X': c->kind = CMD_STOP; break;
-    case 'c': case 'C': c->kind = CMD_CONNECT; break;
     case 'g': case 'G': c->kind = CMD_LAUNCH; break;
     case 'h': case 'H': c->kind = CMD_HOST; break;
     case 'j': case 'J': c->kind = CMD_JOIN; break;
@@ -76,17 +75,6 @@ bool ui_poll(Cmd *c)
         printf("Paste the host's lobby id (right-click or Ctrl+V), then Enter: ");
         fflush(0);
         if (read_line(line, sizeof line)) { c->kind = CMD_JOIN_LOBBY; c->arg = str_to_u64(line); }
-        break;
-    case 'i': case 'I':
-        if (!g_nfriends) { ui_log("No friends online."); break; }
-        ui_log("Friends online:");
-        for (int i = 0; i < g_nfriends; i++) printf("  %2d. %s\n", i + 1, g_friends[i].name);
-        printf("Number to invite (Enter = cancel): ");
-        fflush(0);
-        if (read_line(line, sizeof line)) {
-            int k = atoi(line);
-            if (k >= 1 && k <= g_nfriends) { c->kind = CMD_INVITE; c->arg = g_friends[k - 1].id; }
-        }
         break;
     default: break;
     }

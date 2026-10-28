@@ -112,7 +112,7 @@ IMP HINSTANCE WINAPI GetModuleHandleW(const WCHAR *name);
 
 enum {
     ID_HOST = 101, ID_JOIN, ID_STOP, ID_STATUS, ID_LOBBY, ID_COPYID, ID_JOINID,
-    ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_CONNECT, ID_LOBBYLABEL,
+    ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_LOBBYLABEL,
 };
 
 /* ---------- shared with the engine thread ---------- */
@@ -259,10 +259,9 @@ static void build(void)
     ctl(ID_LISTLABEL, T, WTEXT(""), 0, 0, 14, 166, 572, 20, g_font);
     ctl(ID_LIST, L, WTEXT(""), WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT, WS_EX_CLIENTEDGE,
         14, 188, 430, 112, g_font);
-    ctl(ID_ACTION, B, WTEXT("Invite"), WS_TABSTOP, 0, 452, 188, 134, 34, g_bold);
+    ctl(ID_ACTION, B, WTEXT("Join"), WS_TABSTOP, 0, 452, 188, 134, 34, g_bold);
     ctl(ID_LAUNCH, B, WTEXT("Start Cry of Fear"), WS_TABSTOP, 0, 14, 310, 180, 30, g_font);
-    ctl(ID_CONNECT, B, WTEXT("Connect game"), WS_TABSTOP, 0, 204, 310, 180, 30, g_font);
-    ctl(ID_COPYCONN, B, WTEXT("Copy connect command"), WS_TABSTOP, 0, 394, 310, 192, 30, g_font);
+    ctl(ID_COPYCONN, B, WTEXT("Copy connect command"), WS_TABSTOP, 0, 204, 310, 200, 30, g_font);
     ctl(ID_LOG, E, WTEXT(""), WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, WS_EX_CLIENTEDGE,
         14, 350, 572, 214, g_font);
     SendMessageW(g_c[ID_LOG], EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
@@ -310,12 +309,11 @@ static void refresh_controls(void)
     int which = host ? LIST_FRIENDS_ONLINE : LIST_HOSTING;
     if (which != g_list_shown) show_list(which);
     set_text_once(ID_LISTLABEL, idle ? "" :
-                  host ? "Friends online - pick one and click Invite (or they click Join a friend):" :
+                  host ? "Friends linked to your game right now:" :
                          "Friends hosting - pick one and click Join:");
-    set_text_once(ID_ACTION, host ? "Invite" : "Join");
-    EnableWindow(g_c[ID_ACTION], (host && s->lobby) || (join && !s->lobby));
+    ShowWindow(g_c[ID_ACTION], host ? 0 : 5 /* hide when hosting: nothing to pick */);
+    EnableWindow(g_c[ID_ACTION], join && !s->lobby);
     EnableWindow(g_c[ID_LAUNCH], !g_closing);
-    EnableWindow(g_c[ID_CONNECT], join && s->lobby);
     EnableWindow(g_c[ID_COPYCONN], join && s->lobby);
 }
 
@@ -399,14 +397,14 @@ static void on_command(int id, int code)
         if (code != LBN_DBLCLK) break;
         /* fall through: double-click = button */
     case ID_ACTION: {
-        int which = g_shown.mode == MODE_HOST ? LIST_FRIENDS_ONLINE : LIST_HOSTING;
+        if (g_shown.mode == MODE_HOST) break; /* the host's list is information only */
+        int which = LIST_HOSTING;
         int sel = (int)SendMessageW(g_c[ID_LIST], LB_GETCURSEL, 0, 0);
         if (sel < 0 || sel >= g_nview[which]) {
             MessageBoxW(g_wnd, WTEXT("Pick a friend in the list first."), WTEXT("CoFLink"), MB_ICONWARNING);
             break;
         }
-        if (which == LIST_FRIENDS_ONLINE) push_cmd(CMD_INVITE, g_view[which][sel].id);
-        else push_cmd(CMD_JOIN_LOBBY, g_view[which][sel].lobby);
+        push_cmd(CMD_JOIN_LOBBY, g_view[which][sel].lobby);
         break;
     }
     case 1: /* Enter key: join the pasted lobby id, if there is one */
@@ -414,7 +412,6 @@ static void on_command(int id, int code)
             on_command(ID_JOINID, 0);
         break;
     case ID_LAUNCH: push_cmd(CMD_LAUNCH, 0); break;
-    case ID_CONNECT: push_cmd(CMD_CONNECT, 0); break;
     case ID_COPYCONN: {
         char cmd[48];
         sfmt(cmd, sizeof cmd, "connect 127.0.0.1:%u", (unsigned)g_shown.local_port);
@@ -499,10 +496,9 @@ int main(int argc, char **argv)
                             y < 0 ? 0 : y, ww, wh, 0, 0, inst, 0);
     if (!g_wnd) return 1;
     build();
-    ui_log("HOST: click \"Host a game\". Then start Cry of Fear, create a co-op game,");
-    ui_log("      and type  sv_lan 1  in its console (~).");
-    ui_log("FRIEND: click \"Join a friend\" and pick the host (or just accept their Steam invite).");
-    ui_log("        Then start Cry of Fear as usual - CoFLink connects it to the host by itself.");
+    ui_log("HOST: click \"Host a game\", then \"Start Cry of Fear\" and create a LAN co-op game.");
+    ui_log("FRIEND: click \"Join a friend\" and pick the host (or paste their lobby id).");
+    ui_log("        Once linked: start Cry of Fear, press ~ and paste  connect 127.0.0.1:27115");
     ui_log("");
     on_timer();
     ShowWindow(g_wnd, 1);

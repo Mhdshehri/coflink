@@ -10,9 +10,7 @@ typedef enum {
     CMD_HOST,        /* start hosting */
     CMD_JOIN,        /* start looking for a host */
     CMD_JOIN_LOBBY,  /* arg = lobby id */
-    CMD_INVITE,      /* arg = friend's Steam id */
     CMD_LAUNCH,      /* start Cry of Fear (through Steam, as usual) */
-    CMD_CONNECT,     /* connect the running game to the host now */
     CMD_STATUS,      /* print a status line */
     CMD_STOP,        /* stop hosting/joining, back to the start screen */
     CMD_QUIT,
@@ -34,7 +32,7 @@ typedef struct {
 #define UI_NAME 72
 typedef struct { u64 id, lobby; char name[UI_NAME]; } UiPerson;
 
-enum { LIST_FRIENDS_ONLINE = 0, LIST_HOSTING = 1 };
+enum { LIST_FRIENDS_ONLINE = 0 /* host: friends linked now */, LIST_HOSTING = 1 };
 
 void ui_log(const char *line);
 void ui_state(const UiState *s);
