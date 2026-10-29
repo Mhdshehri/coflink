@@ -84,6 +84,10 @@ IMP int WINAPI FillRect(HDC dc, const RECT *r, HBRUSH b);
 IMP int WINAPI DrawTextW(HDC dc, const WCHAR *t, int n, RECT *r, UINT fmt);
 IMP BOOL WINAPI GetClientRect(HWND w, RECT *r);
 IMP BOOL WINAPI RedrawWindow(HWND w, const RECT *r, HANDLE rgn, UINT flags);
+typedef struct { UINT size; HWND hwnd; DWORD flags; UINT count; DWORD timeout; } FLASHWINFO;
+IMP BOOL WINAPI FlashWindowEx(const FLASHWINFO *f);
+IMP HWND WINAPI GetForegroundWindow(void);
+IMP BOOL WINAPI MessageBeep(UINT type);
 IMP void *WINAPI LoadLibraryExA(const char *path, void *file, DWORD flags);
 IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 
@@ -142,6 +146,9 @@ IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 #define LBS_NOINTEGRALHEIGHT 0x100L
 #define CP_UTF8 65001
 #define MB_ICONWARNING 0x30
+#define MB_YESNO 0x4
+#define MB_ICONQUESTION 0x20
+#define IDYES 6
 #define COLOR_BTNFACE 15
 #define LOGPIXELSY 90
 #define FW_NORMAL 400
@@ -169,6 +176,7 @@ static bool g_state_dirty;
 static UiPerson g_lists[2][64];
 static int g_nlist[2];
 static bool g_list_dirty[2];
+static bool g_alert;
 static Cmd g_cmds[32];
 static int g_cmd_head, g_cmd_tail;
 
@@ -182,6 +190,14 @@ void ui_log(const char *line)
         g_pend[g_npend++] = '\r';
         g_pend[g_npend++] = '\n';
     }
+    LeaveCriticalSection(&g_cs);
+}
+
+void ui_alert(const char *what)
+{
+    (void)what;
+    EnterCriticalSection(&g_cs);
+    g_alert = true;
     LeaveCriticalSection(&g_cs);
 }
 
@@ -267,13 +283,34 @@ static const Theme DARK = { true,
     RGBC(18, 18, 20), RGBC(28, 29, 33), RGBC(232, 230, 227), RGBC(139, 142, 150),
     RGBC(163, 22, 26), RGBC(120, 14, 18), RGBC(40, 42, 47), RGBC(30, 31, 35), RGBC(62, 65, 72),
     RGBC(26, 27, 31), RGBC(85, 88, 96), RGBC(235, 87, 87), RGBC(255, 255, 255) };
+/* light: soft gray page, white boxes and buttons with thin gray outlines */
 static const Theme LIGHT = { false,
-    RGBC(243, 243, 243), RGBC(255, 255, 255), RGBC(27, 27, 27), RGBC(107, 107, 107),
-    RGBC(179, 38, 30), RGBC(140, 25, 20), RGBC(226, 226, 226), RGBC(206, 206, 206), RGBC(190, 190, 190),
-    RGBC(236, 236, 236), RGBC(160, 160, 160), RGBC(179, 38, 30), RGBC(255, 255, 255) };
+    RGBC(244, 245, 247), RGBC(255, 255, 255), RGBC(28, 30, 34), RGBC(106, 112, 122),
+    RGBC(196, 32, 38), RGBC(156, 22, 28), RGBC(255, 255, 255), RGBC(234, 236, 240), RGBC(208, 212, 219),
+    RGBC(236, 238, 241), RGBC(166, 171, 180), RGBC(196, 32, 38), RGBC(255, 255, 255) };
 
 static Theme T;
+/* text boxes and the list sit inside rounded frames drawn in the theme's
+   colors (Windows' own borders are black in both themes) */
+typedef struct { int id, x, y, w, h; } Frame;
+static Frame g_frames[3];
+static int g_nframes;
 static HBRUSH g_br_bg, g_br_panel, g_br_accent;
+
+static void draw_frames(HDC dc)
+{
+    HBRUSH b = CreateSolidBrush(T.panel);
+    HANDLE p = CreatePen(0, 1, T.border);
+    HANDLE ob = SelectObject(dc, b), op = SelectObject(dc, p);
+    for (int i = 0; i < g_nframes; i++) {
+        Frame *f = &g_frames[i];
+        RoundRect(dc, S_(f->x), S_(f->y), S_(f->x + f->w), S_(f->y + f->h), S_(8), S_(8));
+    }
+    SelectObject(dc, ob);
+    SelectObject(dc, op);
+    DeleteObject(b);
+    DeleteObject(p);
+}
 
 static void *sys_proc(const char *dll, const char *fn)
 {
@@ -430,6 +467,15 @@ static HWND ctl(int id, const WCHAR *cls, const WCHAR *text, DWORD style, DWORD 
     return h_;
 }
 
+static HWND ctl(int id, const WCHAR *cls, const WCHAR *text, DWORD style, DWORD ex, int x, int y, int w, int h, HFONT f);
+
+/* a box (text box or list) inside a drawn frame; ix/iy = space inside the frame */
+static void framed(int id, const WCHAR *cls, DWORD style, int x, int y, int w, int h, int ix, int iy)
+{
+    if (g_nframes < 3) g_frames[g_nframes++] = (Frame){ id, x, y, w, h };
+    ctl(id, cls, WTEXT(""), style, 0, x + ix, y + iy, w - 2 * ix, h - 2 * iy, g_font);
+}
+
 static void build(void)
 {
     const WCHAR *B = WTEXT("BUTTON"), *T_ = WTEXT("STATIC"), *E = WTEXT("EDIT"), *L = WTEXT("LISTBOX");
@@ -442,19 +488,18 @@ static void build(void)
     ctl(ID_STOP, B, WTEXT("Stop"), OD, 0, 486, 48, 100, 38, g_font);
     ctl(ID_STATUS, T_, WTEXT(""), 0, 0, 14, 96, 572, 26, g_big);
     ctl(ID_LOBBYLABEL, T_, WTEXT("Lobby code:"), 0, 0, 14, 134, 74, 22, g_font);
-    ctl(ID_LOBBY, E, WTEXT(""), WS_TABSTOP | ES_AUTOHSCROLL | WS_BORDER, 0, 88, 131, 246, 24, g_font);
+    framed(ID_LOBBY, E, WS_TABSTOP | ES_AUTOHSCROLL, 88, 130, 246, 26, 7, 5);
     ctl(ID_COPYID, B, WTEXT("Copy code"), OD, 0, 342, 130, 100, 26, g_font);
     ctl(ID_JOINID, B, WTEXT("Join this code"), OD, 0, 450, 130, 136, 26, g_font);
     ctl(ID_LISTLABEL, T_, WTEXT(""), 0, 0, 14, 168, 572, 20, g_font);
-    ctl(ID_LIST, L, WTEXT(""), WS_TABSTOP | WS_VSCROLL | WS_BORDER | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT |
-        LBS_OWNERDRAWFIXED | LBS_HASSTRINGS, 0, 14, 190, 430, 112, g_font);
+    framed(ID_LIST, L, WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED |
+           LBS_HASSTRINGS, 14, 190, 430, 112, 4, 4);
     ctl(ID_ACTION, B, WTEXT("Join"), OD, 0, 452, 190, 134, 34, g_bold);
     ctl(ID_REFRESH, B, WTEXT("Refresh"), OD, 0, 452, 230, 134, 30, g_font);
     ctl(ID_LAUNCH, B, WTEXT("Start Cry of Fear"), OD, 0, 14, 312, 180, 30, g_font);
     ctl(ID_COPYCONN, B, WTEXT("Copy connect command"), OD, 0, 200, 312, 190, 30, g_font);
     ctl(ID_FAVORITE, B, WTEXT("Add to Favorites"), OD, 0, 396, 312, 190, 30, g_font);
-    ctl(ID_LOG, E, WTEXT(""), WS_VSCROLL | WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 0,
-        14, 352, 572, 212, g_font);
+    framed(ID_LOG, E, WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 14, 352, 572, 212, 7, 5);
     SendMessageW(g_c[ID_LOG], EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
 }
 
@@ -502,8 +547,10 @@ static void refresh_controls(void)
     set_text_once(ID_LISTLABEL, idle ? "" :
                   host ? "Friends linked to your game right now:" :
                          "Friends hosting - pick one and click Join:");
-    ShowWindow(g_c[ID_ACTION], host ? 0 : 5 /* hide when hosting: nothing to pick */);
-    EnableWindow(g_c[ID_ACTION], join && !s->lobby);
+    /* the same button is "Join" for the friend and "Kick" for the host */
+    set_text_once(ID_ACTION, host ? "Kick" : "Join");
+    ShowWindow(g_c[ID_ACTION], idle ? 0 : 5);
+    EnableWindow(g_c[ID_ACTION], !g_closing && ((join && !s->lobby) || (host && g_nview[LIST_FRIENDS_ONLINE] > 0)));
     ShowWindow(g_c[ID_REFRESH], host ? 0 : 5);
     EnableWindow(g_c[ID_REFRESH], !g_closing && (idle || (join && !s->lobby)));
     EnableWindow(g_c[ID_LAUNCH], !g_closing);
@@ -522,6 +569,8 @@ static void on_timer(void)
     n = g_npend;
     memcpy(pend, g_pend, (size_t)n);
     g_npend = 0;
+    bool alert = g_alert;
+    g_alert = false;
     st = g_state;
     st_dirty = g_state_dirty;
     g_state_dirty = false;
@@ -536,6 +585,11 @@ static void on_timer(void)
     LeaveCriticalSection(&g_cs);
 
     if (n) { pend[n] = 0; append_log(pend); }
+    if (alert && GetForegroundWindow() != g_wnd) { /* only when CoFLink isn't the window in front */
+        FLASHWINFO f = { sizeof f, g_wnd, 0x3 | 0xC /* caption + taskbar, until it's clicked */, 0, 0 };
+        FlashWindowEx(&f);
+        MessageBeep(0x40); /* Windows' "Asterisk" sound */
+    }
     if (st_dirty) {
         bool lobby_changed = st.lobby != g_shown.lobby || st.mode != g_shown.mode;
         g_shown = st;
@@ -588,7 +642,24 @@ static void on_command(int id, int code)
         if (code != LBN_DBLCLK) break;
         /* fall through: double-click = button */
     case ID_ACTION: {
-        if (g_shown.mode == MODE_HOST) break; /* the host's list is information only */
+        if (g_shown.mode == MODE_HOST) { /* host: kick the picked friend */
+            if (code == LBN_DBLCLK) break; /* never kick by double-click */
+            int sel = (int)SendMessageW(g_c[ID_LIST], LB_GETCURSEL, 0, 0);
+            if (sel < 0 || sel >= g_nview[LIST_FRIENDS_ONLINE]) {
+                MessageBoxW(g_wnd, WTEXT("Pick a friend in the list first."), WTEXT("CoFLink"), MB_ICONWARNING);
+                break;
+            }
+            UiPerson *p = &g_view[LIST_FRIENDS_ONLINE][sel];
+            char name[UI_NAME], q[256];
+            sfmt(name, sizeof name, "%s", p->name);
+            char *cut = strstr(name, "  ("); /* drop "  (linked)" */
+            if (cut) *cut = 0;
+            sfmt(q, sizeof q, "Kick %s?\n\nThey are cut off and can't link to your game again until you click Stop.", name);
+            static WCHAR wq[256];
+            if (MessageBoxW(g_wnd, wide(q, wq, 256), WTEXT("CoFLink"), MB_YESNO | MB_ICONQUESTION) == IDYES)
+                push_cmd(CMD_KICK, p->id);
+            break;
+        }
         int which = LIST_HOSTING;
         int sel = (int)SendMessageW(g_c[ID_LIST], LB_GETCURSEL, 0, 0);
         if (sel < 0 || sel >= g_nview[which]) {
@@ -627,6 +698,7 @@ static LRESULT WINAPI wndproc(HWND w, UINT m, WPARAM wp, LPARAM lp)
         RECT r;
         GetClientRect(w, &r);
         FillRect((HDC)wp, &r, g_br_bg);
+        draw_frames((HDC)wp);
         return 1;
     }
     case WM_CTLCOLORSTATIC:

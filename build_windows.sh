@@ -25,7 +25,8 @@ mkdef user32 OpenClipboard@4 EmptyClipboard@0 SetClipboardData@8 CloseClipboard@
     DispatchMessageW@4 IsDialogMessageW@8 PostQuitMessage@4 SendMessageW@16 SetWindowTextW@8 \
     GetWindowTextW@12 SetTimer@16 MessageBoxW@16 LoadCursorW@8 LoadIconW@8 ShowWindow@8 \
     UpdateWindow@4 EnableWindow@8 DestroyWindow@4 GetDC@4 ReleaseDC@8 AdjustWindowRectEx@16 \
-    GetSystemMetrics@4 FillRect@12 DrawTextW@20 GetClientRect@8 RedrawWindow@16
+    GetSystemMetrics@4 FillRect@12 DrawTextW@20 GetClientRect@8 RedrawWindow@16 \
+    FlashWindowEx@4 GetForegroundWindow@0 MessageBeep@4
 mkdef gdi32 CreateFontW@56 GetDeviceCaps@8 CreateSolidBrush@4 CreatePen@12 SelectObject@8 DeleteObject@4 \
     GetStockObject@4 SetTextColor@8 SetBkColor@8 SetBkMode@8 RoundRect@28
 mkdef comctl32 InitCommonControls@0

@@ -20,6 +20,7 @@ void plat_init(void)
     signal(SIGINT, on_sig);
     signal(SIGTERM, on_sig);
     setvbuf(stdout, 0, _IONBF, 0);
+    setvbuf(stdin, 0, _IONBF, 0); /* keys typed together: poll() must see each one */
 }
 
 const char *exe_dir(void) { return "."; }

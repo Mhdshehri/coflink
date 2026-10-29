@@ -14,7 +14,9 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.8.3"
+#ifndef VERSION /* the tests build a second copy with a different version */
+#define VERSION "0.9"
+#endif
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
 #define SPACEWAR_APPID 480
@@ -146,6 +148,16 @@ static void send_ctl_data(u64 to, const void *p, int n)
     S.NM_SendMessageToUser(NM, id, p, (uint32_t)n, SEND_RELIABLE | SEND_NONAGLE, CH_CTL);
 }
 
+/* 'H' hello: command, protocol, then this CoFLink's version (older hosts
+   only read the first byte) */
+static void send_hello(void)
+{
+    char m[16] = { 'H', PROTO[0] };
+    int n = (int)strlen(VERSION);
+    memcpy(m + 2, VERSION, (size_t)n);
+    send_ctl_data(g_host, m, 2 + n);
+}
+
 static void close_session(u64 with)
 {
     uint8_t id[IDENT_SIZE];
@@ -185,6 +197,43 @@ static Peer g_peers[MAX_PEERS];
 static int g_npeers;
 static u64 g_ignored[16];
 static int g_nignored;
+/* Friends the host kicked: blocked until the host stops hosting. */
+static u64 g_kicked[32];
+static int g_nkicked;
+
+static bool kicked(u64 id)
+{
+    for (int i = 0; i < g_nkicked; i++)
+        if (g_kicked[i] == id) return true;
+    return false;
+}
+
+/* "0.9" vs "0.10.1": compares number by number. <0, 0, >0 like strcmp. */
+static int ver_cmp(const char *a, const char *b)
+{
+    for (int k = 0; k < 4; k++) {
+        int x = 0, y = 0;
+        while (*a >= '0' && *a <= '9') x = x * 10 + (*a++ - '0');
+        while (*b >= '0' && *b <= '9') y = y * 10 + (*b++ - '0');
+        if (x != y) return x < y ? -1 : 1;
+        if (*a == '.') a++;
+        if (*b == '.') b++;
+    }
+    return 0;
+}
+
+/* Tell the player when a friend runs a different CoFLink version. */
+static void version_note(u64 friend_, const char *ver)
+{
+    if (!ver || !*ver) return;
+    int c = ver_cmp(ver, VERSION);
+    if (c > 0)
+        say("! %s has a newer CoFLink (%s, you have " VERSION "). Update yours: github.com/Mhdshehri/coflink/releases",
+            who(friend_), clean(ver));
+    else if (c < 0)
+        say("(%s has an older CoFLink (%s). It still works; tell them CoFLink " VERSION " is out.)",
+            who(friend_), clean(ver));
+}
 
 static Peer *find_peer(u64 id)
 {
@@ -202,6 +251,7 @@ static Peer *add_peer(u64 id)
     for (int k = 0; k < SLOT_SOCKS; k++) p->s[k] = BADSOCK;
     p->last_heard = now_ms();
     say("+ %s connected through Steam (to your server 127.0.0.1:%u).", who(id), (unsigned)g_game_port);
+    ui_alert("friend linked");
     return p;
 }
 
@@ -238,11 +288,24 @@ static void drop_peer(u64 id, const char *why)
    also on the host's own Steam friends list. Everyone else is dropped. */
 static bool allowed_peer(u64 id)
 {
-    return id && id != g_me && in_lobby(id) && S.Friends_HasFriend(F, id, FRIEND_IMMEDIATE);
+    return id && id != g_me && !kicked(id) && in_lobby(id) && S.Friends_HasFriend(F, id, FRIEND_IMMEDIATE);
+}
+
+/* Host: "Kick" button. The friend is cut off and can't link again until the
+   host stops hosting. Their CoFLink is told so it stops trying. */
+static void kick_peer(u64 id)
+{
+    if (!g_is_host || !id || id == g_me) return;
+    if (!kicked(id) && g_nkicked < 32) g_kicked[g_nkicked++] = id;
+    bool linked = find_peer(id) != 0;
+    send_ctl(id, 'X');
+    if (linked) drop_peer(id, "kicked by you");
+    say("%s is kicked. They can't link to this game again until you click Stop.", who(id));
 }
 
 static void note_ignored(u64 id)
 {
+    if (kicked(id)) { send_ctl(id, 'X'); return; } /* still trying: tell them again */
     for (int i = 0; i < g_nignored; i++)
         if (g_ignored[i] == id) return;
     if (g_nignored < 16) g_ignored[g_nignored++] = id;
@@ -401,12 +464,13 @@ static void on_lobby_entered(u64 lobby, uint32_t response)
         if (g_nrejected < 16) g_rejected[g_nrejected++] = lobby;
         return;
     }
+    version_note(S.MM_GetLobbyOwner(MM, lobby), S.MM_GetLobbyData(MM, lobby, "coflink_ver"));
     g_lobby = lobby;
     g_host = S.MM_GetLobbyOwner(MM, lobby);
     g_host_last = now_ms();
     say("Joined %s's Cry of Fear lobby. Connecting to them through Steam...", who(g_host));
     S.Friends_SetRichPresence(F, "status", "Playing Cry of Fear co-op (CoFLink)");
-    send_ctl(g_host, 'H');
+    send_hello();
     g_last_hello = now_ms();
     if (open_game_socket()) joined_message();
 }
@@ -684,7 +748,7 @@ static void drain_steam(void)
             char c = (char)cm[0];
             S.Msg_Release(m);
             if (c == 'Q') { /* a friend's CoFLink asks "are you hosting?" */
-                if (g_is_host && g_lobby && from != g_me && S.Friends_HasFriend(F, from, FRIEND_IMMEDIATE)) {
+                if (g_is_host && g_lobby && from != g_me && !kicked(from) && S.Friends_HasFriend(F, from, FRIEND_IMMEDIATE)) {
                     uint8_t a[10] = { 'L', (uint8_t)PROTO[0] };
                     memcpy(a + 2, &g_lobby, 8);
                     send_ctl_data(from, a, 10);
@@ -708,7 +772,16 @@ static void drain_steam(void)
                     if (!p) continue;
                 }
                 p->last_heard = now_ms();
-                if (c == 'H') { send_ctl(from, 'W'); p->welcomed = true; }
+                if (c == 'H') {
+                    send_ctl(from, 'W');
+                    if (!p->welcomed && msz > 2) { /* their version follows */
+                        char v[16] = { 0 };
+                        int vn = msz - 2 < 13 ? msz - 2 : 13;
+                        memcpy(v, cm + 2, (size_t)vn);
+                        version_note(from, v);
+                    }
+                    p->welcomed = true;
+                }
             } else if (from == g_host) {
                 g_host_last = now_ms();
                 if (c == 'W' && !g_welcomed) {
@@ -716,6 +789,11 @@ static void drain_steam(void)
                     say("Connected to %s through Steam.", who(g_host));
                 } else if (c == 'B') {
                     say("! %s closed CoFLink.", who(g_host));
+                    lobby_gone();
+                } else if (c == 'X') {
+                    say("! %s removed you from their game. You can't link to it again until they host a new one.",
+                        who(g_host));
+                    if (g_nrejected < 16) g_rejected[g_nrejected++] = g_lobby;
                     lobby_gone();
                 }
             }
@@ -786,6 +864,7 @@ static void on_probe_reply(const uint8_t *b, int len)
     if (!g_server_ready) {
         g_server_ready = true;
         say("%s's Cry of Fear co-op game is up.", who(g_host));
+        ui_alert("host's game is up");
     }
     int fixed = a2s_fix_appid(b, len, g_info, (int)sizeof g_info, COF_APPID);
     if (fixed > 0) {
@@ -848,7 +927,7 @@ static void join_tick(void)
         send_game(g_host, slot, g_buf, r);
     }
     if (!g_lobby) return;
-    if (!g_welcomed && t - g_last_hello > 2000) { send_ctl(g_host, 'H'); g_last_hello = t; }
+    if (!g_welcomed && t - g_last_hello > 2000) { send_hello(); g_last_hello = t; }
     /* check the host's co-op server answers: every 2 s until it does, then
        every 5 s to keep its info (map, players) fresh for the server list */
     if (g_welcomed && t - g_last_probe > (g_server_ready ? 5000u : 2000u)) {
@@ -973,6 +1052,7 @@ static void reset_all(void)
     for (int i = 0; i < g_npeers; i++) close_peer_socks(&g_peers[i]);
     g_npeers = 0;
     g_nignored = 0;
+    g_nkicked = 0;
     udp_close(g_game_sock);
     g_game_sock = BADSOCK;
     g_joining = 0;
@@ -1076,6 +1156,7 @@ static void handle_cmd(const Cmd *c)
         if (g_mode == MODE_JOIN) { g_joining = 0; request_join(c->arg); }
         break;
     case CMD_FAVORITE: add_favorite(); break;
+    case CMD_KICK: kick_peer(c->arg); break;
     case CMD_LAUNCH: /* "Start Cry of Fear" */
         start_game();
         break;

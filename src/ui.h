@@ -13,6 +13,7 @@ typedef enum {
     CMD_LAUNCH,      /* start Cry of Fear (through Steam, as usual) */
     CMD_REFRESH,     /* look for a hosting friend right now */
     CMD_FAVORITE,    /* add 127.0.0.1:<port> to Cry of Fear's Favorites */
+    CMD_KICK,        /* host: arg = friend's Steam id */
     CMD_STATUS,      /* print a status line */
     CMD_STOP,        /* stop hosting/joining, back to the start screen */
     CMD_QUIT,
@@ -37,6 +38,9 @@ typedef struct { u64 id, lobby; char name[UI_NAME]; } UiPerson;
 enum { LIST_FRIENDS_ONLINE = 0 /* host: friends linked now */, LIST_HOSTING = 1 };
 
 void ui_log(const char *line);
+/* something the player is waiting for happened (a friend linked, the host's
+   game is up): the window flashes in the taskbar and plays a short sound */
+void ui_alert(const char *what);
 void ui_state(const UiState *s);
 void ui_list(int which, int n, const UiPerson *p);
 /* Friends found hosting. Return the lobby to join now, or 0. Set *reject to a

@@ -4,7 +4,7 @@ Play **Cry of Fear** co-op with a Steam friend: no VPN (no Hamachi or Radmin), n
 
 The host runs the game's own co-op server on their PC. CoFLink carries the game traffic through Steam's relay network, so your friend joins from Steam.
 
-**Download:** grab `CoFLink-0.8.3.zip` from [Releases](../../releases). Both players unzip it and open `CoFLink.exe`. (Beta: the connection has been played in a real two-player session; the window is new.)
+**Download:** grab `CoFLink-0.9.zip` from [Releases](../../releases). Both players unzip it and open `CoFLink.exe`. (Beta: the connection has been played in a real two-player session; the window is new.)
 
 ## How to play
 
@@ -12,7 +12,8 @@ CoFLink is one program with a simple window for both players, in dark mode by de
 
 **Host**
 1. Click **Host a game**, then **Start Cry of Fear** and create a co-op game (choose LAN).
-2. Keep CoFLink open while you play. Friends who are linked show up in the list.
+2. Keep CoFLink open while you play. Friends who are linked show up in the list, and CoFLink flashes in the taskbar
+   with a short sound when one links. Pick a friend and click **Kick** to cut them off until you host again.
 
 **Friend** (CoFLink only links you; you join the game yourself)
 1. Click **Join a friend**, pick the host under *Friends hosting* and click **Join**
@@ -42,6 +43,8 @@ Host's CoFLink --UDP--> Host's Cry of Fear server (127.0.0.1:27015)
 - Neither player sees the other's IP address.
 - The host only lets in players who are in the lobby **and** on the host's Steam friends list. Everyone else is blocked.
 - The joiner asks before joining, and only accepts traffic from the host it chose.
+- The host can kick a friend; a kicked friend can't link again until the host hosts a new game.
+- If you and your friend have different CoFLink versions, CoFLink tells you who has the newer one.
 - Oversized packets and floods are dropped.
 - `steam_api.dll` is Valve's signed redistributable from [Steamworks.NET 2025.164.1](https://github.com/rlabrecque/Steamworks.NET/releases).
   CoFLink checks its SHA-256 (`fdafb7c65ec7d4182b42bf92cc8671c68e4dc547cc6e613899d2618a47eb65da`) and refuses to load any other file.
@@ -64,12 +67,13 @@ The tests run on Linux, with a mock Steam and a fake game server:
 ```sh
 mkdir -p build
 gcc -std=c11 -fsanitize=address,undefined -o build/coflink_mock src/coflink.c src/a2s.c src/lobbycode.c src/ui_console.c src/plat_posix.c test/steam_mock.c
+gcc -std=c11 -DVERSION='"0.10.1"' -o build/coflink_mock_new src/coflink.c src/a2s.c src/lobbycode.c src/ui_console.c src/plat_posix.c test/steam_mock.c
 python3 test/run_tests.py   # prints ALL OK
 ```
 
 The engine (`src/coflink.c`) is shared by the window (`src/ui_win.c`) and a text front end (`src/ui_console.c`) that the tests drive.
 
-The tests cover: two friends playing through the relay; packets arriving exact and in order; level-load bursts; latency; strangers being blocked; quit and reconnect; foreign lobbies being refused; join confirmation; finding the host through rich presence and by asking a friend's CoFLink directly (host opened first); joining by short lobby code; Refresh finding a new host right away; finding a host who already started Cry of Fear (Steam shows "playing Cry of Fear"); adding the Favorites entry only when asked; the host's game showing in the in-game server list (both server-query formats); Steam invites never joining anything; CoFLink never connecting the game itself; checking the host's co-op server is up (also with challenge-first servers); server-info replies passing unchanged; the game and other local programs sharing the relay; version checks; starting cof.exe directly; stopping, then switching between hosting and joining; and 10% packet loss.
+The tests cover: two friends playing through the relay; packets arriving exact and in order; level-load bursts; latency; strangers being blocked; quit and reconnect; foreign lobbies being refused; join confirmation; finding the host through rich presence and by asking a friend's CoFLink directly (host opened first); joining by short lobby code; Refresh finding a new host right away; finding a host who already started Cry of Fear (Steam shows "playing Cry of Fear"); adding the Favorites entry only when asked; the host's game showing in the in-game server list (both server-query formats); Steam invites never joining anything; CoFLink never connecting the game itself; checking the host's co-op server is up (also with challenge-first servers); server-info replies passing unchanged; the game and other local programs sharing the relay; version checks; starting cof.exe directly; stopping, then switching between hosting and joining; kicking a friend (and them not getting back in, even with the code, until the host hosts again); alerts; version notices between different CoFLink versions; and 10% packet loss.
 
 ## Credits
 

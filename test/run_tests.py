@@ -16,6 +16,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = os.path.join(ROOT, "build", "coflink_mock")
+BIN_NEW = os.path.join(ROOT, "build", "coflink_mock_new")  # same code, version 0.10.1
 FAILS = []
 
 
@@ -256,6 +257,8 @@ def main():
         check(all(c[0] == "127.0.0.1" for c in srv.clients), "server only sees 127.0.0.1 (no IPs exposed)")
         check(a.wait_for(r"host's server answered") is not None, "A was told the server answered")
         check(host.wait_for(r"Your server answered user1002") is not None, "host was told A is loading in")
+        check(host.log.count("[alert] friend linked") == 2, "the host's window alerted once per friend who linked")
+        check("CoFLink (" not in a.log + host.log, "same version: no version notice")
         big = game_client(pa, "BIG", n=3, size=9000, timeout=0.5)
         check(big == 0 and srv.biggest <= 8192, "oversized packets (9000 bytes) are dropped")
 
@@ -412,6 +415,7 @@ def main():
         ja = Proc("JA", dict(base, MOCK_ID="1052", MOCK_FRIENDS="1051", MOCK_COF="1"), ["join", "--yes"])
         procs.append(ja)
         check(ja.wait_for(r"user1051's Cry of Fear co-op game is up", 10) is not None, "joiner checked the host's server is up")
+        check(ja.wait_for(r"\[alert\] host's game is up") is not None, "and the window alerts the friend (flash + sound)")
         check(ja.wait_for(r"Ready: in Cry of Fear press ~, then Ctrl\+V and Enter  \(connect 127\.0\.0\.1:27115\)") is not None,
               "then says exactly what to type in the game")
         time.sleep(12)  # longer than the old auto-connect waited, with the game "running"
@@ -662,6 +666,75 @@ def main():
         try: fq.wait(5)
         except subprocess.TimeoutExpired: fq.kill()
         hfv.stop()
+
+        print("[24] host kicks a friend")
+        def piped(name, env, args):
+            e = dict(os.environ, **base, **env, ASAN_OPTIONS="detect_leaks=0")
+            pr = subprocess.Popen([BIN] + args, env=e, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, text=True)
+            pr.out = []
+            threading.Thread(target=lambda: [pr.out.append(l) for l in pr.stdout], daemon=True).start()
+            def wait(pat, t=8, start=0):
+                end = time.time() + t
+                while time.time() < end:
+                    if re.search(pat, "".join(pr.out[start:])): return True
+                    time.sleep(0.05)
+                return False
+            pr.wait_pat = wait
+            pr.key = lambda k: (pr.stdin.write(k + "\n"), pr.stdin.flush())
+            return pr
+        def end(pr):
+            pr.send_signal(signal.SIGINT)
+            try: pr.wait(5)
+            except subprocess.TimeoutExpired: pr.kill()
+        hk = piped("HK", dict(MOCK_ID="1171", MOCK_FRIENDS="1172,1173"), ["host"])
+        check(hk.wait_pat(r"Lobby is ready"), "host up")
+        code = re.search(r"code (\w{4}-\w{3})", "".join(hk.out)).group(1)
+        jk = piped("JK", dict(MOCK_ID="1172", MOCK_FRIENDS="1171"), ["join", "--no-launch", "--yes"])
+        jk2 = piped("JK2", dict(MOCK_ID="1173", MOCK_FRIENDS="1171"), ["join", "--no-launch", "--yes"])
+        check(jk.wait_pat(r"Connected to user1171") and jk2.wait_pat(r"Connected to user1171"), "two friends linked")
+        time.sleep(1.5)  # the host's list is published once a second
+        idx = 1 + [l for l in "".join(hk.out).splitlines() if "connected through Steam" in l].index(
+            next(l for l in "".join(hk.out).splitlines() if "user1172 connected through Steam" in l))
+        hk.key("K"); hk.key(str(idx))
+        check(hk.wait_pat(r"user1172 disconnected \(kicked by you\)"), "host: the kicked friend is cut off")
+        check(jk.wait_pat(r"user1171 removed you from their game"), "the kicked friend is told")
+        n0 = len(hk.out)
+        time.sleep(4)  # the kicked friend's CoFLink keeps looking (--yes)
+        check(not hk.wait_pat(r"user1172 connected", 0.1, n0), "the kicked friend does not link again")
+        check(not jk.wait_pat(r"Joined user1171", 0.1, len(jk.out) - 3), "and their CoFLink doesn't rejoin that lobby")
+        k0 = len(jk.out)
+        jk.key("X"); jk.key("L"); jk.key(code)  # stop, then try again with the lobby code
+        check(jk.wait_pat(r"removed you from their game", 10, k0), "trying again with the code: still kicked")
+        check(not hk.wait_pat(r"user1172 connected", 0.1, n0), "and still never reaches the host's server")
+        check(jk2.wait_pat(r"Connected to user1171") and "removed you" not in "".join(jk2.out),
+              "the other friend stays linked")
+        hk.key("X"); hk.key("H")  # host stops and hosts again: the kick is over
+        check(hk.wait_pat(r"Lobby is ready", 8, n0 + 1), "host hosts a new game")
+        j0 = len(jk.out)
+        jk.key("X"); jk.key("J")
+        check(jk.wait_pat(r"Connected to user1171", 15, j0), "after a new hosting, the friend can link again")
+        for pr in (jk, jk2, hk): end(pr)
+
+        print("[25] friends on different CoFLink versions are told")
+        hv = Proc("HV", dict(base, MOCK_ID="1181", MOCK_FRIENDS="1182"), ["host"])
+        procs.append(hv)
+        hv.wait_for(r"Lobby is ready")
+        e = dict(os.environ, **base, MOCK_ID="1182", MOCK_FRIENDS="1181", ASAN_OPTIONS="detect_leaks=0")
+        jvp = subprocess.Popen([BIN_NEW, "join", "--no-launch", "--yes"], env=e, stdin=subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        vlog = []
+        threading.Thread(target=lambda: [vlog.append(l) for l in jvp.stdout], daemon=True).start()
+        check(hv.wait_for(r"user1182 has a newer CoFLink \(0\.10\.1, you have 0\.9\)\. Update yours: "
+                          r"github\.com/Mhdshehri/coflink/releases") is not None, "host (0.9) is told the friend has 0.10.1")
+        time.sleep(1)
+        check(re.search(r"user1181 has an older CoFLink \(0\.9\)\. It still works", "".join(vlog)) is not None,
+              "the friend (0.10.1) is told the host has the older one")
+        check(re.search(r"Connected to user1181", "".join(vlog)) is not None, "and they still link")
+        jvp.send_signal(signal.SIGINT)
+        try: jvp.wait(5)
+        except subprocess.TimeoutExpired: jvp.kill()
+        hv.stop()
 
         print("[8] bad internet: 10% of packets lost each way")
         h3 = Proc("H3", dict(base, MOCK_ID="1021", MOCK_FRIENDS="1022", MOCK_LOSS="10"), ["host"])
