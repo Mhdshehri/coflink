@@ -11,17 +11,14 @@ typedef uint64_t u64;
 
 #ifdef _WIN32
 typedef struct FILE FILE;
-int printf(const char *fmt, ...);
 int _vsnprintf(char *buf, size_t n, const char *fmt, va_list ap);
 size_t strlen(const char *s);
 int strcmp(const char *a, const char *b);
-int strncmp(const char *a, const char *b, size_t n);
 char *strchr(const char *s, int c);
 char *strstr(const char *h, const char *n);
 void *memcpy(void *d, const void *s, size_t n);
 void *memset(void *d, int c, size_t n);
 int memcmp(const void *a, const void *b, size_t n);
-int atoi(const char *s);
 void *malloc(size_t n);
 void *calloc(size_t n, size_t m);
 void free(void *p);
@@ -29,11 +26,7 @@ FILE *fopen(const char *path, const char *mode);
 size_t fread(void *p, size_t s, size_t n, FILE *f);
 size_t fwrite(const void *p, size_t s, size_t n, FILE *f);
 int fclose(FILE *f);
-char *fgets(char *buf, int n, FILE *f);
-int fflush(FILE *f);
 void exit(int code);
-FILE *__iob_func(void);
-#define stdin ((FILE *)((char *)__iob_func() + 0))
 #else
 #include <stdio.h>
 #include <string.h>

@@ -17,13 +17,13 @@ int udp_send(sock_t s, const void *p, int n);   /* connected socket */
 int udp_recv(sock_t s, void *p, int n);         /* >0 bytes, 0 = try again, <0 = nothing more */
 int udp_recvfrom(sock_t s, void *p, int n, uint32_t *ip, uint16_t *port);
 int udp_sendto(sock_t s, const void *p, int n, uint32_t ip, uint16_t port);
-uint16_t udp_local_port(sock_t s);
 void udp_close(sock_t s);
 void wait_socks(const sock_t *s, int n, int ms); /* until one is readable or ms pass */
 
 /* console front end only (Linux test build) */
 int key_poll(void);              /* key pressed, or -1. Never blocks. */
 bool read_line(char *buf, int n);/* blocking line read */
+
 void clipboard_set(const char *text);
 bool process_running(const char *exe_name); /* e.g. "cof.exe", case-insensitive */
 void open_url(const char *url);

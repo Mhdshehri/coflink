@@ -91,7 +91,6 @@ IMP BOOL WINAPI MessageBeep(UINT type);
 IMP void *WINAPI LoadLibraryExA(const char *path, void *file, DWORD flags);
 IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 
-#define WM_CREATE 0x1
 #define WM_DESTROY 0x2
 #define WM_CLOSE 0x10
 #define WM_SETFONT 0x30
@@ -118,7 +117,6 @@ IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 #define BS_OWNERDRAW 0xBL
 #define LBS_OWNERDRAWFIXED 0x10L
 #define LBS_HASSTRINGS 0x40L
-#define WS_BORDER 0x800000L
 #define ODT_LISTBOX 2
 #define ODS_SELECTED 0x1
 #define ODS_DISABLED 0x4
@@ -137,7 +135,6 @@ IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 #define WS_CAPTION 0xC00000L
 #define WS_SYSMENU 0x80000L
 #define WS_MINIMIZEBOX 0x20000L
-#define WS_EX_CLIENTEDGE 0x200L
 #define ES_MULTILINE 0x4L
 #define ES_AUTOVSCROLL 0x40L
 #define ES_AUTOHSCROLL 0x80L
@@ -737,7 +734,7 @@ static LRESULT WINAPI wndproc(HWND w, UINT m, WPARAM wp, LPARAM lp)
 static DWORD WINAPI engine_thread(void *arg)
 {
     (void)arg;
-    EngineOpts o = { 27015, 27115, 4, false };
+    EngineOpts o = { 27015, 27115, 4 };
     Cmd none = { CMD_NONE, 0 };
     engine_run(&o, none);
     return 0;

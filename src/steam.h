@@ -55,7 +55,6 @@ typedef struct {
     u64 (*MM_GetLobbyOwner)(void *self, u64 lobby);
     int (*MM_GetNumLobbyMembers)(void *self, u64 lobby);
     u64 (*MM_GetLobbyMemberByIndex)(void *self, u64 lobby, int i);
-    bool (*MM_InviteUserToLobby)(void *self, u64 lobby, u64 user);
     bool (*MM_SetLobbyJoinable)(void *self, u64 lobby, bool joinable);
 
     int (*NM_SendMessageToUser)(void *self, const void *ident, const void *data, uint32_t n, int flags, int ch);
@@ -66,6 +65,7 @@ typedef struct {
     u64 (*Ident_GetSteamID64)(void *ident);
     void (*Msg_Release)(void *msg);
     int (*NU_InitRelayNetworkAccess)(void *self);
+    bool (*NU_SetGlobalConfigInt32)(void *self, int value, int32_t v);
 } SteamApi;
 
 extern SteamApi S;

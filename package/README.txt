@@ -1,4 +1,4 @@
-CoFLink 0.9.3 (beta) - Cry of Fear co-op with a Steam friend
+CoFLink 0.9.4 (beta) - Cry of Fear co-op with a Steam friend
 =====================================================
 No VPN (no Hamachi/Radmin), no port forwarding, no IP addresses.
 One program for both players: open CoFLink.exe and click a button.
@@ -7,7 +7,7 @@ Dark mode by default - the button at the top right switches to light.
 Both of you need: Windows, Steam running and logged in, Cry of Fear
 installed from Steam, and this whole folder (unzip it anywhere, e.g. Desktop).
 Keep CoFLink.exe and steam_api.dll together in the same folder.
-You BOTH need the same CoFLink version (0.9.3).
+You BOTH need the same CoFLink version (0.9.4).
 
 Before the first game, both of you: in Steam, right-click Cry of Fear ->
 Properties -> Installed Files -> "Verify integrity of game files".
@@ -38,7 +38,7 @@ CoFLink only LINKS you to the host. You join the game yourself.
    "Friends hosting" and click Join (or paste the lobby code the host sent
    you, like 1MCE-2B2, and click "Join this code").
    Host not in the list yet? Click "Refresh" after they click "Host a game".
-   Steam invites are not used - ignore them.
+   Steam invites and Steam's "Join Game" button are not used - ignore them.
 2. Wait for "...co-op game is up" in the log (CoFLink flashes in the
    taskbar and plays a short sound when it is).
 3. Click "Start Cry of Fear" (starts the game without its launcher), or
@@ -60,10 +60,12 @@ IS IT SAFE?
   Favorites; remove it in Steam -> View -> Game Servers -> Favorites.)
 - No ports are opened on your PC or router. CoFLink only talks to programs
   on your own PC (127.0.0.1) and to Steam.
-- Traffic goes through Valve's Steam relay, so neither of you sees the
-  other's IP address.
-- The host only lets in people who are in the lobby AND on the host's Steam
-  friends list. Anyone else is blocked and the log says so.
+- Traffic always goes through Valve's Steam relay. CoFLink turns off
+  Steam's direct connections, so neither of you sees the other's IP
+  address, whatever Steam's own "IP sharing" setting says.
+- The host only talks to people on the host's Steam friends list, and only
+  lets in those who are also in the lobby. Anyone else is blocked and the
+  log says so.
 - The friend only links to the host they picked, and only accepts data
   from that host. CoFLink never joins anything on its own (no invites,
   no automatic connect).
@@ -118,7 +120,7 @@ TROUBLESHOOTING (read the log at the bottom of the window)
     Host/Join again.
 "steam_api.dll is not the expected file / missing": use the steam_api.dll
     from this zip, in the same folder as CoFLink.exe.
-Friend: the host never shows up:  check you both have CoFLink 0.9.3 and are
+Friend: the host never shows up:  check you both have CoFLink 0.9.4 and are
     Steam friends. Or ask for the lobby code ("Copy code" on the host's
     side) and use "Join this code".
 "uses a different CoFLink version":  both of you download the same version.

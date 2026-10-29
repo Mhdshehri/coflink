@@ -85,7 +85,6 @@ const char *steam_load(void)
     GET(MM_GetLobbyOwner, "SteamAPI_ISteamMatchmaking_GetLobbyOwner");
     GET(MM_GetNumLobbyMembers, "SteamAPI_ISteamMatchmaking_GetNumLobbyMembers");
     GET(MM_GetLobbyMemberByIndex, "SteamAPI_ISteamMatchmaking_GetLobbyMemberByIndex");
-    GET(MM_InviteUserToLobby, "SteamAPI_ISteamMatchmaking_InviteUserToLobby");
     GET(MM_SetLobbyJoinable, "SteamAPI_ISteamMatchmaking_SetLobbyJoinable");
     GET(NM_SendMessageToUser, "SteamAPI_ISteamNetworkingMessages_SendMessageToUser");
     GET(NM_ReceiveMessagesOnChannel, "SteamAPI_ISteamNetworkingMessages_ReceiveMessagesOnChannel");
@@ -95,6 +94,7 @@ const char *steam_load(void)
     GET(Ident_GetSteamID64, "SteamAPI_SteamNetworkingIdentity_GetSteamID64");
     GET(Msg_Release, "SteamAPI_SteamNetworkingMessage_t_Release");
     GET(NU_InitRelayNetworkAccess, "SteamAPI_ISteamNetworkingUtils_InitRelayNetworkAccess");
+    GET(NU_SetGlobalConfigInt32, "SteamAPI_ISteamNetworkingUtils_SetGlobalConfigValueInt32");
     if (g_missing) {
         sfmt(err, sizeof err, "steam_api.dll has no function %s.", g_missing);
         return err;

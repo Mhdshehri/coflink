@@ -84,14 +84,6 @@ int udp_sendto(sock_t s, const void *p, int n, uint32_t ip, uint16_t port)
     return (int)sendto((int)s, p, (size_t)n, 0, (void *)&a, sizeof a);
 }
 
-uint16_t udp_local_port(sock_t s)
-{
-    struct sockaddr_in a;
-    socklen_t len = sizeof a;
-    if (getsockname((int)s, (void *)&a, &len) != 0) return 0;
-    return ntohs(a.sin_port);
-}
-
 void udp_close(sock_t s) { if (s != BADSOCK) close((int)s); }
 
 void wait_socks(const sock_t *s, int n, int ms)

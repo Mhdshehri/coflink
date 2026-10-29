@@ -18,7 +18,7 @@ mkdef kernel32 Sleep@4 GetTickCount64@0 GetModuleFileNameA@12 SetCurrentDirector
     CreateThread@24 WaitForSingleObject@8 InitializeCriticalSection@4 EnterCriticalSection@4 \
     LeaveCriticalSection@4 MultiByteToWideChar@24 WideCharToMultiByte@32 GetModuleHandleW@4 \
     CreateToolhelp32Snapshot@8 Process32First@8 Process32Next@8 CloseHandle@4 \
-    GetFileAttributesA@4 CreateProcessA@40
+    GetFileAttributesA@4 CreateProcessA@40 GlobalFree@4
 mkdef advapi32 RegGetValueA@28
 mkdef user32 OpenClipboard@4 EmptyClipboard@0 SetClipboardData@8 CloseClipboard@0 \
     RegisterClassExW@4 CreateWindowExW@48 DefWindowProcW@16 GetMessageW@16 TranslateMessage@4 \
@@ -32,10 +32,9 @@ mkdef gdi32 CreateFontW@56 GetDeviceCaps@8 CreateSolidBrush@4 CreatePen@12 Selec
 mkdef comctl32 InitCommonControls@0
 mkdef shell32 ShellExecuteA@24
 mkdef ws2_32 WSAStartup@8 socket@12 bind@12 connect@12 send@16 recv@16 sendto@24 recvfrom@24 \
-    select@20 closesocket@4 ioctlsocket@12 getsockname@12 WSAGetLastError@0 WSAIoctl@36
-mkdef msvcrt printf _vsnprintf strlen strcmp strncmp strchr strstr memcpy memset memcmp atoi \
-    malloc calloc free fopen fread fwrite fclose fgets fflush exit __iob_func \
-    _ui64toa _strtoui64 __getmainargs
+    select@20 closesocket@4 ioctlsocket@12 WSAGetLastError@0 WSAIoctl@36
+mkdef msvcrt _vsnprintf strlen strcmp strchr strstr memcpy memset memcmp \
+    malloc calloc free fopen fread fwrite fclose exit _ui64toa _strtoui64 __getmainargs
 
 # icon, manifest (modern look, sharp text on high-DPI screens) and version info
 llvm-rc -no-preprocess -C 65001 -FO "$OUT/coflink.res" res/coflink.rc

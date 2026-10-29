@@ -312,7 +312,7 @@ static bool m_HasFriend(void *s, u64 id, int fl) { (void)s; (void)fl; load_frien
 static bool m_SetRichPresence(void *s, const char *k, const char *v)
 {
     (void)s;
-    if (strcmp(k, "connect") != 0) return true;
+    if (strcmp(k, "coflink_lobby") != 0) return true;
     char p[600]; snprintf(p, sizeof p, "%s/rp_%llu", dir, (unsigned long long)me);
     FILE *f = fopen(p, "w"); fputs(v, f); fclose(f);
     return true;
@@ -322,7 +322,7 @@ static const char *m_GetFriendRichPresence(void *s, u64 id, const char *k)
     (void)s;
     static char v[256];
     v[0] = 0;
-    if (strcmp(k, "connect") != 0 || getenv("MOCK_HIDE_RP")) return v;
+    if (strcmp(k, "coflink_lobby") != 0 || getenv("MOCK_HIDE_RP")) return v;
     char p[600]; snprintf(p, sizeof p, "%s/rp_%llu", dir, (unsigned long long)id);
     FILE *f = fopen(p, "r");
     if (f) { if (!fgets(v, sizeof v, f)) v[0] = 0; fclose(f); }
@@ -418,13 +418,6 @@ static const char *m_GetLobbyData(void *s, u64 l, const char *k)
 static u64 m_GetLobbyOwner(void *s, u64 l) { (void)s; return lobby_read(l).owner; }
 static int m_GetNumLobbyMembers(void *s, u64 l) { (void)s; return lobby_read(l).nmem; }
 static u64 m_GetLobbyMemberByIndex(void *s, u64 l, int i) { (void)s; Lobby L = lobby_read(l); return i < L.nmem ? L.mem[i] : 0; }
-static bool m_InviteUserToLobby(void *s, u64 l, u64 user)
-{
-    (void)s;
-    char p[600]; snprintf(p, sizeof p, "%s/invite_%llu", dir, (unsigned long long)user);
-    FILE *f = fopen(p, "w"); fprintf(f, "%llu %llu\n", (unsigned long long)l, (unsigned long long)me); fclose(f);
-    return true;
-}
 static bool m_SetLobbyJoinable(void *s, u64 l, bool j) { (void)s; (void)l; (void)j; return true; }
 
 static int m_SendMessageToUser(void *s, const void *ident, const void *data, uint32_t n, int flags, int ch)
@@ -464,6 +457,12 @@ static void m_SetSteamID64(void *id, u64 v) { int32_t t = 16, sz = 8; memcpy(id,
 static u64 m_GetSteamID64(void *id) { int32_t t; memcpy(&t, id, 4); if (t != 16) return 0; u64 v; memcpy(&v, (char *)id + 8, 8); return v; }
 static void m_Release(void *m) { Msg *x = m; free(x->data); free(x); }
 static int m_InitRelay(void *s) { (void)s; return 1; }
+static bool m_SetGlobalConfigInt32(void *s, int value, int32_t v)
+{
+    (void)s;
+    printf("[mock] global config %d = %d\n", value, (int)v);
+    return true;
+}
 static uint32_t m_GetAppInstallDir(void *s, uint32_t app, char *buf, uint32_t n)
 {
     (void)s;
@@ -489,11 +488,11 @@ const char *steam_load(void)
     S.MM_CreateLobby = m_CreateLobby; S.MM_JoinLobby = m_JoinLobby; S.MM_LeaveLobby = m_LeaveLobby;
     S.MM_SetLobbyData = m_SetLobbyData; S.MM_GetLobbyData = m_GetLobbyData; S.MM_GetLobbyOwner = m_GetLobbyOwner;
     S.MM_GetNumLobbyMembers = m_GetNumLobbyMembers; S.MM_GetLobbyMemberByIndex = m_GetLobbyMemberByIndex;
-    S.MM_InviteUserToLobby = m_InviteUserToLobby; S.MM_SetLobbyJoinable = m_SetLobbyJoinable;
+    S.MM_SetLobbyJoinable = m_SetLobbyJoinable;
     S.NM_SendMessageToUser = m_SendMessageToUser; S.NM_ReceiveMessagesOnChannel = m_ReceiveMessagesOnChannel;
     S.NM_AcceptSessionWithUser = m_AcceptSessionWithUser; S.NM_CloseSessionWithUser = m_CloseSessionWithUser;
     S.Ident_SetSteamID64 = m_SetSteamID64; S.Ident_GetSteamID64 = m_GetSteamID64;
-    S.Msg_Release = m_Release; S.NU_InitRelayNetworkAccess = m_InitRelay;
+    S.Msg_Release = m_Release; S.NU_InitRelayNetworkAccess = m_InitRelay; S.NU_SetGlobalConfigInt32 = m_SetGlobalConfigInt32;
     return 0;
 }
 

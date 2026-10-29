@@ -216,12 +216,12 @@ def main():
         host = Proc("host", dict(base, MOCK_ID="1001", MOCK_FRIENDS="1002,1003,1005"), ["host"])
         procs.append(host)
         check(host.wait_for(r"Lobby is ready") is not None, "host created a lobby")
-        a = Proc("A", dict(base, MOCK_ID="1002", MOCK_FRIENDS="1001"), ["join", "--no-launch", "--yes"])
+        a = Proc("A", dict(base, MOCK_ID="1002", MOCK_FRIENDS="1001"), ["join", "--yes"])
         procs.append(a)
         check(a.wait_for(r"Connected to user1001") is not None, "friend A found the host and connected")
         pa = local_port(a)
         check(pa == 27115, f"friend A's game port is 27115 (got {pa})")
-        b = Proc("B", dict(base, MOCK_ID="1003", MOCK_FRIENDS="1001"), ["join", "--no-launch", "--yes"])
+        b = Proc("B", dict(base, MOCK_ID="1003", MOCK_FRIENDS="1001"), ["join", "--yes"])
         procs.append(b)
         check(b.wait_for(r"Connected to user1001") is not None, "friend B connected")
         pb = local_port(b)
@@ -237,6 +237,8 @@ def main():
         check(host.wait_for(r"Your server answered user1002") is not None, "host was told A is loading in")
         check(host.log.count("[alert] friend linked") == 2, "the host's window alerted once per friend who linked")
         check("CoFLink (" not in a.log + host.log, "same version: no version notice")
+        check("[mock] global config 104 = 0" in host.log and "[mock] global config 104 = 0" in a.log,
+              "both sides turn off direct connections (IP never shared, always Valve's relay)")
         big = game_client(pa, "BIG", n=3, size=9000, timeout=0.5)
         check(big == 0 and srv.biggest <= 8192, "oversized packets (9000 bytes) are dropped")
 
@@ -251,7 +253,7 @@ def main():
         check(relayed - direct < 5, f"relay adds under 5 ms round trip (direct {direct:.2f} ms, relayed {relayed:.2f} ms)")
 
         print("[2] a stranger who is not the host's friend")
-        st = Proc("stranger", dict(base, MOCK_ID="1009", MOCK_FRIENDS="1001"), ["join", "--no-launch", "--yes"])
+        st = Proc("stranger", dict(base, MOCK_ID="1009", MOCK_FRIENDS="1001"), ["join", "--yes"])
         procs.append(st)
         ps = local_port(st)
         before = len(srv.clients)
@@ -268,11 +270,11 @@ def main():
         check(game_client(pb, "B2", n=50) == 50, "B still plays after A left")
 
         print("[4] Steam invites are not used: an accepted invite joins nothing")
-        c = Proc("C", dict(base, MOCK_ID="1005", MOCK_FRIENDS="1001"), ["idle", "--no-launch"])
+        c = Proc("C", dict(base, MOCK_ID="1005", MOCK_FRIENDS="1001"), ["idle"])
         procs.append(c)
         time.sleep(1)
         lobby = lobby_id_from(host.log)
-        with open(os.path.join(d, "invite_1005"), "w") as f:  # what InviteUserToLobby does in the mock
+        with open(os.path.join(d, "invite_1005"), "w") as f:  # a Steam invite arriving (CoFLink never sends any)
             f.write(f"{lobby} 1001\n")
         check(c.wait_for(r"Steam invites aren't used") is not None, "C is told to use Join a friend instead")
         time.sleep(2)
@@ -295,7 +297,7 @@ def main():
             f.write("owner 1007\nmember 1007\n")
         with open(os.path.join(d, "playing_1007"), "w") as f:
             f.write("555\n")
-        j = Proc("J", dict(base, MOCK_ID="1008", MOCK_FRIENDS="1007"), ["join", "--no-launch", "--yes"])
+        j = Proc("J", dict(base, MOCK_ID="1008", MOCK_FRIENDS="1007"), ["join", "--yes"])
         procs.append(j)
         check(j.wait_for(r"not a Cry of Fear co-op game") is not None, "joiner refused the foreign lobby")
         time.sleep(4)
@@ -307,7 +309,7 @@ def main():
         procs.append(h2)
         h2.wait_for(r"Lobby is ready")
         e = dict(os.environ, **base, MOCK_ID="1012", MOCK_FRIENDS="1011", ASAN_OPTIONS="detect_leaks=0")
-        q = subprocess.Popen([BIN, "join", "--no-launch"], env=e, stdin=subprocess.PIPE,
+        q = subprocess.Popen([BIN, "join"], env=e, stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         try:
             out, _ = q.communicate("n\n", timeout=6)
@@ -321,7 +323,7 @@ def main():
         h4 = Proc("H4", dict(base, MOCK_ID="1031", MOCK_FRIENDS="1032"), ["host"])
         procs.append(h4)
         check(h4.wait_for(r"Lobby is ready") is not None, "host ready")
-        j4 = Proc("J4", dict(base, MOCK_ID="1032", MOCK_FRIENDS="1031", MOCK_HIDE_LOBBY="1"), ["join", "--no-launch", "--yes"])
+        j4 = Proc("J4", dict(base, MOCK_ID="1032", MOCK_FRIENDS="1031", MOCK_HIDE_LOBBY="1"), ["join", "--yes"])
         procs.append(j4)
         check(j4.wait_for(r"Connected to user1031") is not None, "joiner found the host anyway and connected")
         p4 = local_port(j4)
@@ -333,7 +335,7 @@ def main():
         e = dict(os.environ, **base, MOCK_ID="1033", MOCK_FRIENDS="", ASAN_OPTIONS="detect_leaks=0")
         with open(os.path.join(d, "friends_note"), "w"):
             pass
-        q = subprocess.Popen([BIN, "join", "--no-launch"], env=e, stdin=subprocess.PIPE,
+        q = subprocess.Popen([BIN, "join"], env=e, stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         time.sleep(1.0)
         q.stdin.write("L\n" + lob4 + "\n"); q.stdin.flush()
@@ -407,7 +409,7 @@ def main():
         procs.append(hi)
         hi.wait_for(r"Lobby is ready")
         lobi = lobby_id_from(hi.log)
-        ji2 = Proc("JI2", dict(base, MOCK_ID="1062", MOCK_FRIENDS="1061"), ["host", "--no-launch"])
+        ji2 = Proc("JI2", dict(base, MOCK_ID="1062", MOCK_FRIENDS="1061"), ["host"])
         procs.append(ji2)
         ji2.wait_for(r"Lobby is ready")
         with open(os.path.join(d, "invite_1062"), "w") as f:
@@ -415,14 +417,14 @@ def main():
         time.sleep(2)
         check("Joined user1061" not in ji2.log and "Joining lobby" not in ji2.log, "while hosting: nothing happens")
         ji2.stop()
-        jj = Proc("JJ", dict(base, MOCK_ID="1062", MOCK_FRIENDS="1061"), ["join", "--no-launch"])
+        jj = Proc("JJ", dict(base, MOCK_ID="1062", MOCK_FRIENDS="1061"), ["join"])
         procs.append(jj)
         check(jj.wait_for(r"Found user1061 hosting") is not None, "while looking for a host: still finds the host normally")
         jj.stop(); hi.stop()
 
         print("[14] the game and Steam's server query share the relay without mixing answers")
         hs = Proc("HS", dict(base, MOCK_ID="1071", MOCK_FRIENDS="1072"), ["host"])
-        js = Proc("JS", dict(base, MOCK_ID="1072", MOCK_FRIENDS="1071"), ["join", "--no-launch", "--yes"])
+        js = Proc("JS", dict(base, MOCK_ID="1072", MOCK_FRIENDS="1071"), ["join", "--yes"])
         procs += [hs, js]
         ps_ = local_port(js)
         js.wait_for(r"Connected to user1071")
@@ -448,7 +450,7 @@ def main():
             f.write("owner 1081\nmember 1081\ndata coflink 1\ndata coflink_ver 1.1\n")
         with open(os.path.join(d, "playing_1081"), "w") as f:
             f.write("777\n")
-        jv = Proc("JV", dict(base, MOCK_ID="1082", MOCK_FRIENDS="1081"), ["join", "--no-launch", "--yes"])
+        jv = Proc("JV", dict(base, MOCK_ID="1082", MOCK_FRIENDS="1081"), ["join", "--yes"])
         procs.append(jv)
         check(jv.wait_for(r"user1081 uses a different CoFLink version \(1\.1\)") is not None,
               "an old CoFLink host is refused with a clear message")
@@ -460,13 +462,13 @@ def main():
         hq.wait_for(r"Lobby is ready")
         time.sleep(3)  # host is up well before the friend
         jq = Proc("JQ", dict(base, MOCK_ID="1092", MOCK_FRIENDS="1091", MOCK_HIDE_LOBBY="1", MOCK_HIDE_RP="1"),
-                  ["join", "--no-launch", "--yes"])
+                  ["join", "--yes"])
         procs.append(jq)
         check(jq.wait_for(r"Found user1091 hosting") is not None, "friend found the host by asking its CoFLink")
         check(jq.wait_for(r"Connected to user1091") is not None, "and connected")
         jq.stop()
         jx = Proc("JX", dict(base, MOCK_ID="1094", MOCK_FRIENDS="1091", MOCK_HIDE_LOBBY="1", MOCK_HIDE_RP="1"),
-                  ["join", "--no-launch", "--yes"])  # 1094 is not on the host's friends list
+                  ["join", "--yes"])  # 1094 is not on the host's friends list
         procs.append(jx)
         time.sleep(8)
         check("Found user1091" not in jx.log, "someone who isn't the host's friend gets no answer")
@@ -475,7 +477,7 @@ def main():
         print("[20] a server that asks for a challenge first is still seen as up")
         srv.challenge = True
         hc = Proc("HC", dict(base, MOCK_ID="1131", MOCK_FRIENDS="1132"), ["host"])
-        jc = Proc("JC", dict(base, MOCK_ID="1132", MOCK_FRIENDS="1131"), ["join", "--no-launch", "--yes"])
+        jc = Proc("JC", dict(base, MOCK_ID="1132", MOCK_FRIENDS="1131"), ["join", "--yes"])
         procs += [hc, jc]
         check(jc.wait_for(r"user1131's Cry of Fear co-op game is up") is not None, "challenge answered, server seen as up")
         srv.challenge = False
@@ -486,7 +488,7 @@ def main():
         procs.append(hv)
         hv.wait_for(r"Lobby is ready")
         lobv = lobby_id_from(hv.log)
-        jv1 = Proc("JV1", dict(base, MOCK_ID="1112", MOCK_FRIENDS="1111", MOCK_INVITE_NOT_ACCEPTED="1"), ["idle", "--no-launch"])
+        jv1 = Proc("JV1", dict(base, MOCK_ID="1112", MOCK_FRIENDS="1111", MOCK_INVITE_NOT_ACCEPTED="1"), ["idle"])
         procs.append(jv1)
         time.sleep(1)
         with open(os.path.join(d, "invite_1112"), "w") as f:
@@ -501,7 +503,7 @@ def main():
         open(os.path.join(g1, "CoFLaunchApp.exe"), "w").close()
         def launch_log(env):
             e = dict(os.environ, **base, MOCK_ID="1121", MOCK_FRIENDS="", ASAN_OPTIONS="detect_leaks=0", **env)
-            q = subprocess.Popen([BIN, "idle", "--no-launch"], env=e, stdin=subprocess.PIPE,
+            q = subprocess.Popen([BIN, "idle"], env=e, stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             time.sleep(1.0)
             q.stdin.write("G\n"); q.stdin.flush()
@@ -532,7 +534,7 @@ def main():
 
         print("[21] Refresh: see right away when a friend starts hosting")
         e = dict(os.environ, **base, MOCK_ID="1142", MOCK_FRIENDS="1141", ASAN_OPTIONS="detect_leaks=0")
-        rq = subprocess.Popen([BIN, "idle", "--no-launch"], env=e, stdin=subprocess.PIPE,
+        rq = subprocess.Popen([BIN, "idle"], env=e, stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         rlog = []
         threading.Thread(target=lambda: [rlog.append(l) for l in rq.stdout], daemon=True).start()
@@ -564,7 +566,7 @@ def main():
         procs.append(hg)
         hg.wait_for(r"Lobby is ready")
         jg = Proc("JG", dict(base, MOCK_ID="1152", MOCK_FRIENDS="1151", MOCK_FRIEND_IN_COF="1", MOCK_HIDE_RP="1"),
-                  ["join", "--no-launch", "--yes"])
+                  ["join", "--yes"])
         procs.append(jg)
         check(jg.wait_for(r"Found user1151 hosting", 8) is not None, "found by itself within a few seconds")
         check(jg.wait_for(r"Connected to user1151") is not None, "and linked")
@@ -572,7 +574,7 @@ def main():
         print("     Steam shows no game at all for the host: Refresh still finds them")
         e = dict(os.environ, **base, MOCK_ID="1153", MOCK_FRIENDS="1151,1199,1198", MOCK_FRIEND_NO_GAME="1", MOCK_HIDE_RP="1",
                  ASAN_OPTIONS="detect_leaks=0")
-        rq = subprocess.Popen([BIN, "idle", "--no-launch"], env=e, stdin=subprocess.PIPE,
+        rq = subprocess.Popen([BIN, "idle"], env=e, stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         rlog = []
         threading.Thread(target=lambda: [rlog.append(l) for l in rq.stdout], daemon=True).start()
@@ -588,7 +590,7 @@ def main():
         except subprocess.TimeoutExpired: rq.kill()
         print("     someone who isn't the host's friend still gets no answer")
         jn2 = Proc("JN2", dict(base, MOCK_ID="1154", MOCK_FRIENDS="1151", MOCK_FRIEND_IN_COF="1", MOCK_HIDE_RP="1"),
-                   ["join", "--no-launch", "--yes"])
+                   ["join", "--yes"])
         procs.append(jn2)
         time.sleep(7)
         check("Found user1151" not in jn2.log, "not on the host's friends list: host stays hidden")
@@ -617,8 +619,8 @@ def main():
         hk = piped("HK", dict(MOCK_ID="1171", MOCK_FRIENDS="1172,1173"), ["host"])
         check(hk.wait_pat(r"Lobby is ready"), "host up")
         code = re.search(r"code (\w{4}-\w{3})", "".join(hk.out)).group(1)
-        jk = piped("JK", dict(MOCK_ID="1172", MOCK_FRIENDS="1171"), ["join", "--no-launch", "--yes"])
-        jk2 = piped("JK2", dict(MOCK_ID="1173", MOCK_FRIENDS="1171"), ["join", "--no-launch", "--yes"])
+        jk = piped("JK", dict(MOCK_ID="1172", MOCK_FRIENDS="1171"), ["join", "--yes"])
+        jk2 = piped("JK2", dict(MOCK_ID="1173", MOCK_FRIENDS="1171"), ["join", "--yes"])
         check(jk.wait_pat(r"Connected to user1171") and jk2.wait_pat(r"Connected to user1171"), "two friends linked")
         time.sleep(1.5)  # the host's list is published once a second
         idx = 1 + [l for l in "".join(hk.out).splitlines() if "connected through Steam" in l].index(
@@ -648,7 +650,7 @@ def main():
         procs.append(hv)
         hv.wait_for(r"Lobby is ready")
         e = dict(os.environ, **base, MOCK_ID="1182", MOCK_FRIENDS="1181", ASAN_OPTIONS="detect_leaks=0")
-        jvp = subprocess.Popen([BIN_NEW, "join", "--no-launch", "--yes"], env=e, stdin=subprocess.DEVNULL,
+        jvp = subprocess.Popen([BIN_NEW, "join", "--yes"], env=e, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         vlog = []
         threading.Thread(target=lambda: [vlog.append(l) for l in jvp.stdout], daemon=True).start()
@@ -667,7 +669,7 @@ def main():
 
         print("[8] bad internet: 10% of packets lost each way")
         h3 = Proc("H3", dict(base, MOCK_ID="1021", MOCK_FRIENDS="1022", MOCK_LOSS="10"), ["host"])
-        j3 = Proc("J3", dict(base, MOCK_ID="1022", MOCK_FRIENDS="1021", MOCK_LOSS="10"), ["join", "--no-launch", "--yes"])
+        j3 = Proc("J3", dict(base, MOCK_ID="1022", MOCK_FRIENDS="1021", MOCK_LOSS="10"), ["join", "--yes"])
         procs += [h3, j3]
         ok3 = j3.wait_for(r"Connected to user1021") is not None
         if not ok3: print("---- H3 log ----\n" + h3.log + "\n---- J3 log ----\n" + j3.log)

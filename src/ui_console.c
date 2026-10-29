@@ -1,7 +1,7 @@
 /* ui_console.c - text front end for the CoFLink engine. Used by the automated
  * tests (Linux, mock Steam); behaves like the old console version:
  *   coflink host [--port N] [--players N]
- *   coflink join [lobby id] [--port N] [--no-launch] [--yes]
+ *   coflink join [lobby id] [--port N] [--yes]
  * Keys (one per line on stdin): L paste lobby id, S status, G start game,
  * X stop, H host, J join, K kick (then friend number), Q quit (the same actions as the window's buttons). */
 #include "ui.h"
@@ -95,7 +95,7 @@ bool ui_poll(Cmd *c)
 int main(int argc, char **argv)
 {
     plat_init();
-    EngineOpts o = { 27015, 27115, 4, false };
+    EngineOpts o = { 27015, 27115, 4 };
     Cmd first = { CMD_NONE, 0 };
     int port = 0;
     u64 lobby = 0;
@@ -107,7 +107,6 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "join")) first.kind = CMD_JOIN;
         else if (!strcmp(a, "--port") && i + 1 < argc) port = atoi(argv[++i]);
         else if (!strcmp(a, "--players") && i + 1 < argc) o.max_players = atoi(argv[++i]);
-        else if (!strcmp(a, "--no-launch")) o.no_launch = true;
         else if (!strcmp(a, "--yes")) g_yes = true;
         else if (lobby_parse(a)) lobby = lobby_parse(a); /* a lobby code or full id */
     }

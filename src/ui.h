@@ -24,10 +24,8 @@ enum { MODE_IDLE = 0, MODE_HOST = 1, MODE_JOIN = 2 };
 
 typedef struct {
     int mode;
-    bool steam_ok;
     u64 lobby;            /* host: own lobby; join: lobby joined */
     uint16_t local_port;  /* join: where Cry of Fear connects */
-    int friends_connected;
     char status[160];     /* one-line summary for the big status label */
 } UiState;
 
@@ -51,6 +49,5 @@ bool ui_poll(Cmd *c);
 typedef struct {
     uint16_t game_port, local_port;
     int max_players;
-    bool no_launch;
 } EngineOpts;
 void engine_run(const EngineOpts *o, Cmd first);

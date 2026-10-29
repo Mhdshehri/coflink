@@ -15,7 +15,7 @@
 #include "ui.h"
 
 #ifndef VERSION /* the tests build a second copy with a different version */
-#define VERSION "0.9.3"
+#define VERSION "0.9.4"
 #endif
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
@@ -30,8 +30,8 @@
 #define MAX_GAME_PKT 8192      /* GoldSrc packets are < 4 KB; anything bigger is dropped */
 #define MAX_PKTS_PER_SEC 3000  /* per sender; normal play is ~100-200 */
 /* Each game packet carries one leading "slot" byte: one slot per local UDP
-   source on the friend's PC (the game, and Steam's own server query when it
-   connects the game), so answers go back to the right program. */
+   source on the friend's PC (normally just Cry of Fear), so answers go back
+   to the right program. */
 #define NSLOT 4
 #define SLOT_PROBE 7           /* CoFLink's own "is the host's server up?" check */
 #define SLOT_SOCKS 8
@@ -46,7 +46,6 @@ static uint16_t g_game_port = 27015;  /* host: port of the Cry of Fear server */
 static uint16_t g_local_port = 27115; /* join: port the friend's game connects to */
 static uint16_t g_local_port_base = 27115;
 static int g_max_players = 4;
-static bool g_no_launch;
 static uint8_t g_buf[BUF_SIZE];
 
 
@@ -98,6 +97,15 @@ static const char *clean(const char *n)
     for (; n && n[i] && i < 64; i++) {
         unsigned char c = (unsigned char)n[i];
         o[i] = (c < 0x20 || c == 0x7f) ? '?' : (char)c;
+    }
+    if (n && n[i]) { /* cut short: don't leave half of a UTF-8 character (e.g. Arabic) */
+        int j = i;
+        while (j > 0 && ((unsigned char)o[j - 1] & 0xC0) == 0x80) j--; /* back to the character's first byte */
+        if (j > 0) {
+            unsigned char lead = (unsigned char)o[j - 1];
+            int need = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+            if (j - 1 + need > i) i = j - 1; /* incomplete: drop it */
+        }
     }
     o[i] = 0;
     return o;
@@ -196,25 +204,26 @@ typedef struct {
 static Peer g_peers[MAX_PEERS];
 static int g_npeers;
 static u64 g_ignored[16];
-static int g_nignored;
+static unsigned g_nignored;
 /* Friends the host kicked: blocked until the host stops hosting. */
-static u64 g_kicked[32];
+static u64 g_kicked[32], g_kick_told[32];
 static int g_nkicked;
 
-static bool kicked(u64 id)
+static int kicked_index(u64 id)
 {
     for (int i = 0; i < g_nkicked; i++)
-        if (g_kicked[i] == id) return true;
-    return false;
+        if (g_kicked[i] == id) return i;
+    return -1;
 }
+static bool kicked(u64 id) { return kicked_index(id) >= 0; }
 
 /* "0.9" vs "0.10.1": compares number by number. <0, 0, >0 like strcmp. */
 static int ver_cmp(const char *a, const char *b)
 {
     for (int k = 0; k < 4; k++) {
         int x = 0, y = 0;
-        while (*a >= '0' && *a <= '9') x = x * 10 + (*a++ - '0');
-        while (*b >= '0' && *b <= '9') y = y * 10 + (*b++ - '0');
+        while (*a >= '0' && *a <= '9') { if (x < 100000) x = x * 10 + (*a - '0'); a++; }
+        while (*b >= '0' && *b <= '9') { if (y < 100000) y = y * 10 + (*b - '0'); b++; }
         if (x != y) return x < y ? -1 : 1;
         if (*a == '.') a++;
         if (*b == '.') b++;
@@ -296,7 +305,7 @@ static bool allowed_peer(u64 id)
 static void kick_peer(u64 id)
 {
     if (!g_is_host || !id || id == g_me) return;
-    if (!kicked(id) && g_nkicked < 32) g_kicked[g_nkicked++] = id;
+    if (!kicked(id) && g_nkicked < 32) { g_kick_told[g_nkicked] = now_ms(); g_kicked[g_nkicked++] = id; }
     bool linked = find_peer(id) != 0;
     send_ctl(id, 'X');
     if (linked) drop_peer(id, "kicked by you");
@@ -305,10 +314,14 @@ static void kick_peer(u64 id)
 
 static void note_ignored(u64 id)
 {
-    if (kicked(id)) { send_ctl(id, 'X'); return; } /* still trying: tell them again */
-    for (int i = 0; i < g_nignored; i++)
+    int k = kicked_index(id);
+    if (k >= 0) { /* still trying: tell them again, at most every 2 s */
+        if (now_ms() - g_kick_told[k] > 2000) { send_ctl(id, 'X'); g_kick_told[k] = now_ms(); }
+        return;
+    }
+    for (int i = 0; i < 16; i++)
         if (g_ignored[i] == id) return;
-    if (g_nignored < 16) g_ignored[g_nignored++] = id;
+    g_ignored[g_nignored++ % 16] = id; /* said once each (the last 16 people) */
     if (in_lobby(id))
         say("! Blocked %s: they are in the lobby but not on your Steam friends list.", who(id));
     else
@@ -449,7 +462,7 @@ static void on_lobby_entered(u64 lobby, uint32_t response)
     if (open_game_socket()) joined_message();
 }
 
-/* ---------- host: lobby + invites ---------- */
+/* ---------- host: the lobby ---------- */
 
 static void on_lobby_created(int32_t result, u64 lobby)
 {
@@ -461,16 +474,14 @@ static void on_lobby_created(int32_t result, u64 lobby)
         return;
     }
     g_lobby = lobby;
-    char conn[64];
-    sfmt(conn, sizeof conn, "+connect_lobby %s", idstr(lobby));
     S.MM_SetLobbyData(MM, lobby, "coflink", "1");
     S.MM_SetLobbyData(MM, lobby, "coflink_ver", VERSION);
     S.MM_SetLobbyData(MM, lobby, "coflink_proto", PROTO);
-    S.MM_SetLobbyData(MM, lobby, "host", S.Friends_GetPersonaName(F));
     S.MM_SetLobbyJoinable(MM, lobby, true);
     S.Friends_SetRichPresence(F, "status", "Hosting Cry of Fear co-op (CoFLink)");
-    S.Friends_SetRichPresence(F, "connect", conn);
-    S.Friends_SetRichPresence(F, "coflink", "host");
+    /* Not the "connect" key: that one gives friends a Steam "Join Game"
+       button, which only launches Spacewar. */
+    S.Friends_SetRichPresence(F, "coflink_lobby", idstr(lobby));
     clipboard_set(codestr(lobby));
     say("");
     say("=== Lobby is ready (code %s, copied to clipboard) ===", codestr(lobby));
@@ -536,11 +547,15 @@ static void handle_cb(int cb, uint8_t *p, int size)
             say("(Steam invites aren't used. Click \"Join a friend\" to link with the host.)");
         break;
     case CB_NetMsgSessionRequest: {
+        /* Host: only Steam friends get a session (their data is then checked
+           against the lobby). Friend: only the host, or friends answering
+           "are you hosting?" while looking. */
         u64 from = S.Ident_GetSteamID64(p);
-        bool ok = g_is_host ? true /* data is checked against the lobby */
+        bool ok = g_is_host ? S.Friends_HasFriend(F, from, FRIEND_IMMEDIATE)
                   : (g_host && from == g_host) ||
                     (g_mode == MODE_JOIN && !g_lobby && S.Friends_HasFriend(F, from, FRIEND_IMMEDIATE));
         if (ok) S.NM_AcceptSessionWithUser(NM, p);
+        else if (g_is_host) note_ignored(from);
         break;
     }
     case CB_NetMsgSessionFailed:
@@ -596,7 +611,7 @@ static u64 g_refresh_at;
 static int scan_for_host(bool verbose)
 {
     /* Ways to see a hosting friend: (1) the lobby in their "game played" info,
-       (2) the "+connect_lobby <id>" their CoFLink puts in its rich presence -
+       (2) the lobby id their CoFLink puts in its rich presence -
        both only while Steam shows them in CoFLink ("Spacewar"). Once the host
        starts Cry of Fear, Steam shows "playing Cry of Fear" instead and both
        go blank, so (3) CoFLink asks friends' CoFLink directly: every few
@@ -617,9 +632,8 @@ static int scan_for_host(bool verbose)
         u64 t = now_ms();
         if (!lob && in_coflink) { /* 2nd way: the lobby in their Steam rich presence */
             S.Friends_RequestFriendRichPresence(F, id);
-            const char *rp = S.Friends_GetFriendRichPresence(F, id, "connect");
-            const char *c = rp ? strstr(rp, "+connect_lobby ") : 0;
-            if (c) lob = str_to_u64(c + 15);
+            const char *rp = S.Friends_GetFriendRichPresence(F, id, "coflink_lobby");
+            if (rp && *rp >= '0' && *rp <= '9') lob = str_to_u64(rp);
         }
         if (!lob) { /* 3rd way: ask their CoFLink directly */
             Answer *a = answer_for(id, false);
@@ -906,8 +920,8 @@ static void join_tick(void)
 /* ---------- starting Cry of Fear without its launcher ---------- */
 
 /* Cry of Fear's launcher (CoFLaunchApp.exe) is skipped: cof.exe is started
-   directly with the options the Cry of Fear server browser uses. */
-#define COF_ARGS "-basedir cryoffear -game cryoffear -hw -heapsize 1536000"
+   directly, with the options the launcher would give it. */
+#define COF_ARGS "-basedir cryoffear -game cryoffear -hw -heapsize 1536000" /* as its launcher passes */
 
 static char *read_small_file(const char *path, int *len)
 {
@@ -1056,10 +1070,8 @@ static void make_status(UiState *st)
 {
     memset(st, 0, sizeof *st);
     st->mode = g_mode;
-    st->steam_ok = g_steam_ok;
     st->lobby = g_lobby;
     st->local_port = g_local_port;
-    st->friends_connected = g_npeers;
     if (g_mode == MODE_IDLE) {
         sfmt(st->status, sizeof st->status, g_steam_ok ? "Ready. Host a game, or join a friend." :
              "Choose Host a game or Join a friend.");
@@ -1136,7 +1148,6 @@ void engine_run(const EngineOpts *o, Cmd first)
     g_game_port = o->game_port ? o->game_port : 27015;
     g_local_port = g_local_port_base = o->local_port ? o->local_port : 27115;
     g_max_players = o->max_players >= 2 && o->max_players <= 8 ? o->max_players : 4;
-    g_no_launch = o->no_launch;
     say("CoFLink " VERSION " - Cry of Fear co-op over Steam (no VPN, no port forwarding)");
     /* Connect to Steam right away (shows "Signed in as..."). If Steam isn't
        running yet, Host/Join retries. */
@@ -1229,6 +1240,10 @@ static bool steam_start(void)
     if (!S.User_BLoggedOn(U)) { say("! Steam is in offline mode. Go online and try again."); S.Shutdown(); return false; }
     g_me = S.User_GetSteamID(U);
     S.NU_InitRelayNetworkAccess(NU);
+    /* Always through Valve's relay: never share either player's IP address
+       for a direct connection, whatever Steam's own "IP sharing" setting is. */
+    if (!S.NU_SetGlobalConfigInt32(NU, 104 /* P2P_Transport_ICE_Enable */, 0 /* disable */))
+        say("! Steam would not turn off direct connections; your IP may be shared with the host.");
     say("Signed in to Steam as %s.", who(g_me));
     return true;
 }

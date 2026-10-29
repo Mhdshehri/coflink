@@ -1,5 +1,6 @@
 /* plat_win.c - Windows side of plat.h. Win32 functions are declared here by
- * hand (no Windows SDK), imported from kernel32/ws2_32/user32/shell32 (winmm loaded from System32 at run time). */
+ * hand (no Windows SDK), imported from kernel32, advapi32, user32, shell32,
+ * ws2_32 and msvcrt (winmm is loaded from System32 at run time). */
 #include "plat.h"
 
 #define WINAPI __attribute__((stdcall))
@@ -17,6 +18,7 @@ IMP BOOL WINAPI SetCurrentDirectoryA(const char *dir);
 IMP HANDLE WINAPI GlobalAlloc(UINT flags, size_t n);
 IMP void *WINAPI GlobalLock(HANDLE h);
 IMP BOOL WINAPI GlobalUnlock(HANDLE h);
+IMP HANDLE WINAPI GlobalFree(HANDLE h);
 IMP void *WINAPI LoadLibraryExA(const char *path, void *file, DWORD flags);
 IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 #define LOAD_LIBRARY_SEARCH_SYSTEM32 0x800
@@ -51,7 +53,6 @@ IMP int WINAPI recvfrom(SOCKET s, void *p, int n, int flags, void *from, int *fr
 IMP int WINAPI select(int nfds, fd_set_w *r, fd_set_w *w, fd_set_w *e, const struct timeval_w *t);
 IMP int WINAPI closesocket(SOCKET s);
 IMP int WINAPI ioctlsocket(SOCKET s, long cmd, unsigned long *arg);
-IMP int WINAPI getsockname(SOCKET s, void *addr, int *len);
 IMP int WINAPI WSAGetLastError(void);
 IMP int WINAPI WSAIoctl(SOCKET s, DWORD code, void *in, DWORD inlen, void *out, DWORD outlen, DWORD *ret, void *ov, void *cb);
 
@@ -147,14 +148,6 @@ int udp_sendto(sock_t s, const void *p, int n, uint32_t ip, uint16_t port)
     return sendto((SOCKET)s, p, n, 0, &a, sizeof a);
 }
 
-uint16_t udp_local_port(sock_t s)
-{
-    struct sockaddr_in4 a;
-    int len = sizeof a;
-    if (getsockname((SOCKET)s, &a, &len) != 0) return 0;
-    return be16(a.port);
-}
-
 void udp_close(sock_t s) { if (s != BADSOCK) closesocket((SOCKET)s); }
 
 void wait_socks(const sock_t *s, int n, int ms)
@@ -174,13 +167,14 @@ void clipboard_set(const char *text)
     size_t n = strlen(text) + 1;
     HANDLE h = GlobalAlloc(2 /* GMEM_MOVEABLE */, n);
     if (!h) return;
-    memcpy(GlobalLock(h), text, n);
+    void *p = GlobalLock(h);
+    if (!p) { GlobalFree(h); return; }
+    memcpy(p, text, n);
     GlobalUnlock(h);
-    if (OpenClipboard(0)) {
-        EmptyClipboard();
-        SetClipboardData(1 /* CF_TEXT */, h);
-        CloseClipboard();
-    }
+    if (!OpenClipboard(0)) { GlobalFree(h); return; }
+    EmptyClipboard();
+    if (!SetClipboardData(1 /* CF_TEXT */, h)) GlobalFree(h); /* on success Windows owns it */
+    CloseClipboard();
 }
 
 /* PROCESSENTRY32 (ANSI, 32-bit): 9 fields of 4 bytes, then the exe name */
