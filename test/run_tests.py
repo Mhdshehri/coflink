@@ -725,10 +725,12 @@ def main():
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         vlog = []
         threading.Thread(target=lambda: [vlog.append(l) for l in jvp.stdout], daemon=True).start()
-        check(hv.wait_for(r"user1182 has a newer CoFLink \(0\.10\.1, you have 0\.9\)\. Update yours: "
-                          r"github\.com/Mhdshehri/coflink/releases") is not None, "host (0.9) is told the friend has 0.10.1")
+        cur = re.search(r'#define VERSION "([\d.]+)"', open(os.path.join(ROOT, "src", "coflink.c")).read()).group(1)
+        cv = re.escape(cur)
+        check(hv.wait_for(r"user1182 has a newer CoFLink \(0\.10\.1, you have " + cv + r"\)\. Update yours: "
+                          r"github\.com/Mhdshehri/coflink/releases") is not None, f"host ({cur}) is told the friend has 0.10.1")
         time.sleep(1)
-        check(re.search(r"user1181 has an older CoFLink \(0\.9\)\. It still works", "".join(vlog)) is not None,
+        check(re.search(r"user1181 has an older CoFLink \(" + cv + r"\)\. It still works", "".join(vlog)) is not None,
               "the friend (0.10.1) is told the host has the older one")
         check(re.search(r"Connected to user1181", "".join(vlog)) is not None, "and they still link")
         jvp.send_signal(signal.SIGINT)

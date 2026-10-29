@@ -15,7 +15,7 @@
 #include "ui.h"
 
 #ifndef VERSION /* the tests build a second copy with a different version */
-#define VERSION "0.9"
+#define VERSION "0.9.1"
 #endif
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
@@ -140,6 +140,7 @@ static void send_ctl(u64 to, char c)
 }
 
 static void on_probe_reply(const uint8_t *b, int len);
+static void note_query(const char *who_, const uint8_t *b, int n, uint16_t from_port, const char *what);
 
 static void send_ctl_data(u64 to, const void *p, int n)
 {
@@ -418,8 +419,8 @@ static void add_favorite(void)
     int r = S.MM_AddFavoriteGame(MM, COF_APPID, 0x7F000001u /* 127.0.0.1 */, g_local_port, g_local_port,
                                  1 /* favorite */, unix_time());
     if (r >= 0)
-        say("Added 127.0.0.1:%u to Cry of Fear's Favorites (in the game: Find servers -> Favorites).",
-            (unsigned)g_local_port);
+        say("Added 127.0.0.1:%u to Cry of Fear's Favorites (in the game: Find servers -> Favorites). (check: Steam said %d)",
+            (unsigned)g_local_port, r);
     else
         say("! Steam would not add it to Favorites. Use the console: connect 127.0.0.1:%u", (unsigned)g_local_port);
 }
@@ -725,6 +726,7 @@ static void drain_steam(void)
                 if (slot == SLOT_PROBE) {
                     on_probe_reply(body, len);
                 } else if (g_slot_port[slot]) {
+                    note_query("host's server replied", body, len, g_slot_port[slot], "passed back");
                     udp_sendto(g_game_sock, body, len, g_game_ip, g_slot_port[slot]);
                     g_server_ready = true;
                     if (!g_down++ && !g_said_down) {
@@ -873,11 +875,40 @@ static void on_probe_reply(const uint8_t *b, int len)
         memcpy(g_info, b, (size_t)len); /* already a standard reply with the right id */
         g_info_len = len;
     }
+    static bool told;
+    if (!told) {
+        told = true;
+        say("(check) host's server info: '%c' reply, %d bytes -> server-list reply %s (%d bytes)",
+            len > 4 && b[4] >= 32 && b[4] < 127 && b[4] != '%' ? b[4] : '?', len, g_info_len ? "ready" : "NOT made", g_info_len);
+    }
 }
 
 static bool is_info_query(const uint8_t *b, int n)
 {
     return n >= 25 && b[0] == 0xFF && b[1] == 0xFF && b[2] == 0xFF && b[3] == 0xFF && b[4] == 'T';
+}
+
+/* Server-list check: say (once per kind) what Cry of Fear / Steam asked
+   CoFLink's port and what happened, so a server-list problem can be pinned down. */
+static void note_query(const char *who_, const uint8_t *b, int n, uint16_t from_port, const char *what)
+{
+    static char seen[24][28];
+    static int nseen;
+    if (n < 5 || b[0] != 0xFF || b[1] != 0xFF || b[2] != 0xFF || b[3] != 0xFF) return;
+    char text[24];
+    int k = 0;
+    for (int i = 4; i < n && k < 20; i++) {
+        uint8_t c = b[i];
+        if (!c) break;
+        text[k++] = (c >= 32 && c < 127 && c != '%') ? (char)c : '.';
+    }
+    text[k] = 0;
+    char key[28];
+    sfmt(key, sizeof key, "%c%.20s", who_[0], text);
+    for (int i = 0; i < nseen; i++)
+        if (!strcmp(seen[i], key)) return;
+    if (nseen < 24) sfmt(seen[nseen++], sizeof seen[0], "%s", key);
+    say("(check) %s '%s' (%d bytes, from port %u) -> %s", who_, text, n, (unsigned)from_port, what);
 }
 
 /* Join side: say when the host's co-op game is up, so the friend knows to
@@ -910,16 +941,21 @@ static void join_tick(void)
         uint16_t port;
         int r = udp_recvfrom(g_game_sock, g_buf, BUF_SIZE, &ip, &port);
         if (r < 0) break;
-        if (r == 0 || r > MAX_GAME_PKT || !g_lobby) continue;
+        if (r == 0 || r > MAX_GAME_PKT) continue;
+        if (!g_lobby) { note_query("asked", g_buf, r, port, "not answered: not linked to a host right now"); continue; }
         g_game_ip = ip;
+        if (is_info_query(g_buf, r) && !g_info_len)
+            note_query("asked", g_buf, r, port, "passed to the host (no server info here yet)");
         if (is_info_query(g_buf, r) && g_info_len) { /* the server list asking about the host's game */
             udp_sendto(g_game_sock, g_info, g_info_len, ip, port);
+            note_query("asked", g_buf, r, port, "answered by CoFLink with the host's game info");
             if (!g_said_answered) {
                 g_said_answered = true;
                 say("(Showing %s's game in Cry of Fear's server list.)", who(g_host));
             }
             continue;
         }
+        if (!is_info_query(g_buf, r)) note_query("asked", g_buf, r, port, "passed to the host's server");
         bool first = !g_up;
         int slot = slot_for(port, t);
         if (first) say("Cry of Fear is talking to CoFLink. Passing it to %s...", who(g_host));
