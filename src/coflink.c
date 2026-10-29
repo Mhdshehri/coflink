@@ -15,7 +15,7 @@
 #include "ui.h"
 
 #ifndef VERSION /* the tests build a second copy with a different version */
-#define VERSION "0.9.1"
+#define VERSION "0.9.2"
 #endif
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
@@ -335,6 +335,8 @@ static u64 g_last_probe, g_welcomed_ms;
 static uint8_t g_info[2048];
 static int g_info_len;
 int a2s_fix_appid(const uint8_t *in, int n, uint8_t *out, int cap, uint32_t appid);
+int a2s_appids(const uint8_t *in, int n, int *shortid, long long *gameapp);
+static long long g_server_app = -1; /* the app id the host's own server announces (for Favorites) */
 static u64 g_rejected[16];
 static int g_nrejected;
 /* Direct discovery: "are you hosting?" ('Q') to friends running CoFLink;
@@ -416,8 +418,17 @@ static void add_favorite(void)
 {
     if (g_mode != MODE_JOIN || !g_lobby) { say("! Link to a host first, then add to Favorites."); return; }
     if (!S.MM_AddFavoriteGame) return;
+    /* Test: Steam keeps Favorites per game. Cry of Fear's own server list may
+       look under Half-Life (70) or under whatever app id its server announces,
+       so the address goes under each of those too. */
     int r = S.MM_AddFavoriteGame(MM, COF_APPID, 0x7F000001u /* 127.0.0.1 */, g_local_port, g_local_port,
                                  1 /* favorite */, unix_time());
+    uint32_t extra[2] = { 70, g_server_app > 0 ? (uint32_t)g_server_app : 0 };
+    for (int k = 0; k < 2; k++) {
+        if (!extra[k] || extra[k] == COF_APPID || (k == 1 && extra[1] == extra[0])) continue;
+        int r2 = S.MM_AddFavoriteGame(MM, extra[k], 0x7F000001u, g_local_port, g_local_port, 1, unix_time());
+        say("(check) also added under app %u (Steam said %d)", (unsigned)extra[k], r2);
+    }
     if (r >= 0)
         say("Added 127.0.0.1:%u to Cry of Fear's Favorites (in the game: Find servers -> Favorites). (check: Steam said %d)",
             (unsigned)g_local_port, r);
@@ -878,6 +889,12 @@ static void on_probe_reply(const uint8_t *b, int len)
     static bool told;
     if (!told) {
         told = true;
+        int sid;
+        long long gapp;
+        if (a2s_appids(b, len, &sid, &gapp)) {
+            say("(check) host's server says it is app %d (short id) / %lld (game id)", sid, gapp);
+            g_server_app = gapp > 0 ? gapp : sid > 0 ? sid : -1;
+        }
         say("(check) host's server info: '%c' reply, %d bytes -> server-list reply %s (%d bytes)",
             len > 4 && b[4] >= 32 && b[4] < 127 && b[4] != '%' ? b[4] : '?', len, g_info_len ? "ready" : "NOT made", g_info_len);
     }

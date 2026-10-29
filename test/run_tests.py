@@ -662,6 +662,7 @@ def main():
         check(fwait(r"favorite added: app 223710, 127\.0\.0\.1:27115 \(query 27115\), flags 1, time now"),
               "the button adds Cry of Fear (app 223710) at 127.0.0.1:27115 as a favorite")
         check(fwait(r"Added 127\.0\.0\.1:27115 to Cry of Fear's Favorites"), "and the log says where to find it")
+        check(fwait(r"favorite added: app 70, 127\.0\.0\.1:27115"), "test build: also under Half-Life (70)")
         fq.send_signal(signal.SIGINT)
         try: fq.wait(5)
         except subprocess.TimeoutExpired: fq.kill()

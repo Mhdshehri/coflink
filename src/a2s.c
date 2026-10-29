@@ -124,3 +124,30 @@ int a2s_fix_appid(const uint8_t *in, int n, uint8_t *out, int cap, uint32_t appi
     w64(&w, (u64)appid);
     return w.bad ? 0 : w.n;
 }
+
+/* For the log: the app ids a standard 'I' info reply announces (the 16-bit
+   id and, when present, the 64-bit game id's app part). 0 if not an 'I' reply. */
+int a2s_appids(const uint8_t *in, int n, int *shortid, long long *gameapp)
+{
+    *shortid = -1;
+    *gameapp = -1;
+    if (n < 6 || in[0] != 0xFF || in[1] != 0xFF || in[2] != 0xFF || in[3] != 0xFF || in[4] != 'I') return 0;
+    Rd r = { in, n, 5, false };
+    int l;
+    rbyte(&r);
+    rstr(&r, &l); rstr(&r, &l); rstr(&r, &l); rstr(&r, &l);
+    *shortid = rshort(&r);
+    rskip(&r, 7);
+    if (r.i < r.n) rstr(&r, &l);
+    int edf = r.i < r.n ? rbyte(&r) : 0;
+    if (edf & 0x80) rskip(&r, 2);
+    if (edf & 0x10) rskip(&r, 8);
+    if (edf & 0x40) { rskip(&r, 2); rstr(&r, &l); }
+    if (edf & 0x20) rstr(&r, &l);
+    if (edf & 0x01) {
+        unsigned long long gid = 0;
+        for (int k = 0; k < 8; k++) gid |= (unsigned long long)rbyte(&r) << (8 * k);
+        if (!r.bad) *gameapp = (long long)(gid & 0xFFFFFF);
+    }
+    return r.bad ? 0 : 1;
+}
