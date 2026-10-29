@@ -1,4 +1,4 @@
-CoFLink 0.9.5 (beta) - Cry of Fear co-op with a Steam friend
+CoFLink 0.9.6 (beta) - Cry of Fear co-op with a Steam friend
 =====================================================
 No VPN (no Hamachi/Radmin), no port forwarding, no IP addresses.
 One program for both players: open CoFLink.exe and click a button.
@@ -10,7 +10,7 @@ The box at the bottom has two buttons: "How to" shows your steps right now
 Both of you need: Windows, Steam running and logged in, Cry of Fear
 installed from Steam, and this whole folder (unzip it anywhere, e.g. Desktop).
 Keep CoFLink.exe and steam_api.dll together in the same folder.
-You BOTH need the same CoFLink version (0.9.5).
+You BOTH need the same CoFLink version (0.9.6).
 
 Before the first game, both of you: in Steam, right-click Cry of Fear ->
 Properties -> Installed Files -> "Verify integrity of game files".
@@ -123,13 +123,18 @@ TROUBLESHOOTING (read the log at the bottom of the window)
     Host/Join again.
 "steam_api.dll is not the expected file / missing": use the steam_api.dll
     from this zip, in the same folder as CoFLink.exe.
-Friend: the host never shows up:  check you both have CoFLink 0.9.5 and are
+Friend: the host never shows up:  check you both have CoFLink 0.9.6 and are
     Steam friends. Or ask for the lobby code ("Copy code" on the host's
     side) and use "Join this code".
 "uses a different CoFLink version":  both of you download the same version.
 "has a newer CoFLink":  your friend has a newer version. It still works,
     but get the newer one: github.com/Mhdshehri/coflink/releases
 "removed you from their game":  the host kicked you.
+"... is not on your Steam friends list":  the host must be YOUR Steam
+    friend (being friends with someone else in the game isn't enough).
+    Add them as a friend, then click Refresh.
+"Still reaching <host> through Steam (slow internet?)":  just wait; on a
+    slow connection the first link can take a little longer.
 Friend: "Waiting for <host> to start their co-op game":  the host starts a
     co-op game in Cry of Fear and types sv_lan 1.
 Host: "nothing answers on 127.0.0.1:27015":  start the co-op game in Cry

@@ -302,6 +302,8 @@ def main():
             f.write("owner 1007\nmember 1007\n")
         with open(os.path.join(d, "playing_1007"), "w") as f:
             f.write("555\n")
+        with open(os.path.join(d, "rp_1007"), "w") as f:  # it says it hosts that lobby
+            f.write("555")
         j = Proc("J", dict(base, MOCK_ID="1008", MOCK_FRIENDS="1007"), ["join", "--yes"])
         procs.append(j)
         check(j.wait_for(r"not a Cry of Fear co-op game") is not None, "joiner refused the foreign lobby")
@@ -348,9 +350,18 @@ def main():
         q.send_signal(signal.SIGINT)
         out, _ = q.communicate(timeout=5)
         check("Paste the host's lobby code" in out, "L asked for the lobby code")
-        check("Joined user1031's Cry of Fear lobby" in out, "pasting the code joined the host's lobby")
-        check(h4.wait_for(r"Blocked user1033: they are in the lobby but not on your Steam friends list") is not None,
-              "a non-friend joining by id still can't reach the server")
+        check("user1031 hosts that game, but is not on your Steam friends list" in out and "Add user1031 as a Steam friend" in out,
+              "pasting a code of a host who isn't your friend: told to add them as a friend")
+        check("Linked to" not in out and "user1033 connected" not in h4.log, "and nothing is linked")
+        e = dict(os.environ, **base, MOCK_ID="1035", MOCK_FRIENDS="1031", ASAN_OPTIONS="detect_leaks=0")
+        q = subprocess.Popen([BIN, "idle"], env=e, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        time.sleep(1.0)
+        q.stdin.write("L\n" + lob4 + "\n"); q.stdin.flush()
+        time.sleep(3.0)
+        q.send_signal(signal.SIGINT)
+        out, _ = q.communicate(timeout=5)
+        check("Joined user1031's Cry of Fear lobby" in out, "a friend pasting the code joins the host's lobby")
         h4.stop()
 
         print("[11] one program: stop hosting, then switch to joining")
@@ -456,6 +467,8 @@ def main():
             f.write("owner 1081\nmember 1081\ndata coflink 1\ndata coflink_ver 1.1\n")
         with open(os.path.join(d, "playing_1081"), "w") as f:
             f.write("777\n")
+        with open(os.path.join(d, "rp_1081"), "w") as f:
+            f.write("777")
         jv = Proc("JV", dict(base, MOCK_ID="1082", MOCK_FRIENDS="1081"), ["join", "--yes"])
         procs.append(jv)
         check(jv.wait_for(r"user1081 uses a different CoFLink version \(1\.1\)") is not None,
@@ -672,6 +685,25 @@ def main():
         try: jvp.wait(5)
         except subprocess.TimeoutExpired: jvp.kill()
         hv.stop()
+
+        print("[26] only hosts are listed: a friend who just joined someone isn't 'hosting'")
+        hs3 = Proc("HS3", dict(base, MOCK_ID="1191", MOCK_FRIENDS="1192"), ["host"])          # Sky
+        procs.append(hs3)
+        hs3.wait_for(r"Lobby is ready")
+        pc = Proc("PC", dict(base, MOCK_ID="1192", MOCK_FRIENDS="1191,1193"), ["join", "--yes"])  # KaZ
+        procs.append(pc)
+        check(pc.wait_for(r"Connected to user1191") is not None, "the PC links to the host")
+        lap = Proc("LAP", dict(base, MOCK_ID="1193", MOCK_FRIENDS="1192"), ["join", "--yes"])      # KaZ_763: friend of the PC only
+        procs.append(lap)
+        time.sleep(6)
+        check("Found user1192 hosting" not in lap.log and "Joining lobby" not in lap.log,
+              "the laptop does not see the PC (a player, not a host) as hosting")
+        lap.stop()
+        lap2 = Proc("LAP2", dict(base, MOCK_ID="1193", MOCK_FRIENDS="1192,1191"), ["join", "--yes"])  # now friends with the host too
+        procs.append(lap2)
+        check(lap2.wait_for(r"Found user1191 hosting") is not None and "user1192 hosting" not in lap2.log,
+              "once friends with the host, the laptop sees the real host (and only the host)")
+        lap2.stop(); pc.stop(); hs3.stop()
 
         print("[8] bad internet: 10% of packets lost each way")
         h3 = Proc("H3", dict(base, MOCK_ID="1021", MOCK_FRIENDS="1022", MOCK_LOSS="10"), ["host"])

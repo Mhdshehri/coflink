@@ -15,7 +15,7 @@
 #include "ui.h"
 
 #ifndef VERSION /* the tests build a second copy with a different version */
-#define VERSION "0.9.5"
+#define VERSION "0.9.6"
 #endif
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
@@ -335,7 +335,7 @@ static sock_t g_game_sock = BADSOCK;
 static uint32_t g_game_ip;
 static uint16_t g_slot_port[NSLOT];  /* local source port using each slot */
 static u64 g_slot_used[NSLOT];
-static bool g_welcomed, g_host_warned, g_said_down, g_warned_no_answer;
+static bool g_welcomed, g_host_warned, g_warned_slow, g_said_down, g_warned_no_answer;
 static u64 g_host_last, g_last_hello, g_last_ka, g_up, g_down, g_first_up_ms;
 /* CoFLink checks the host's co-op server answers, to tell the friend when to connect */
 static bool g_server_ready, g_said_wait_server, g_said_ready;
@@ -372,7 +372,7 @@ static void reset_connect_state(void)
 static void reset_join_state(void)
 {
     g_lobby = g_host = 0;
-    g_welcomed = g_host_warned = g_said_down = g_warned_no_answer = false;
+    g_welcomed = g_host_warned = g_warned_slow = g_said_down = g_warned_no_answer = false;
     g_up = g_down = g_first_up_ms = 0;
     for (int k = 0; k < NSLOT; k++) { g_slot_port[k] = 0; g_slot_used[k] = 0; }
     reset_connect_state();
@@ -447,7 +447,14 @@ static void on_lobby_entered(u64 lobby, uint32_t response)
         if (g_nrejected < 16) g_rejected[g_nrejected++] = lobby;
         return;
     }
-    version_note(S.MM_GetLobbyOwner(MM, lobby), S.MM_GetLobbyData(MM, lobby, "coflink_ver"));
+    u64 owner = S.MM_GetLobbyOwner(MM, lobby);
+    if (!S.Friends_HasFriend(F, owner, FRIEND_IMMEDIATE)) {
+        say("! %s hosts that game, but is not on your Steam friends list, so they can't let you in.", who(owner));
+        say("  Add %s as a Steam friend, then click Refresh.", who(owner));
+        S.MM_LeaveLobby(MM, lobby);
+        return;
+    }
+    version_note(owner, S.MM_GetLobbyData(MM, lobby, "coflink_ver"));
     g_lobby = lobby;
     g_host = S.MM_GetLobbyOwner(MM, lobby);
     g_host_last = now_ms();
@@ -617,30 +624,33 @@ static int scan_for_host(bool verbose)
         bool playing = S.Friends_GetFriendGamePlayed(F, id, info);
         uint32_t app = playing ? (uint32_t)(rd64(info) & 0xFFFFFF) : 0;
         bool in_coflink = app == SPACEWAR_APPID, in_cof = app == COF_APPID;
+        /* A friend who only JOINED someone's game is in a CoFLink lobby too, so
+           a lobby on its own doesn't mean they host. It counts only when the
+           friend's own CoFLink says it hosts that lobby: in its rich presence
+           (set by hosts only) or in a direct answer (hosts only answer). */
         u64 lob = in_coflink ? rd64(info + 16) : 0;
+        bool host = false;
         u64 t = now_ms();
-        if (!lob && in_coflink) { /* 2nd way: the lobby in their Steam rich presence */
+        if (in_coflink) {
             S.Friends_RequestFriendRichPresence(F, id);
             const char *rp = S.Friends_GetFriendRichPresence(F, id, "coflink_lobby");
-            if (rp && *rp >= '0' && *rp <= '9') lob = str_to_u64(rp);
+            u64 r = (rp && *rp >= '0' && *rp <= '9') ? str_to_u64(rp) : 0;
+            if (r && (!lob || r == lob)) { lob = r; host = true; }
         }
-        if (!lob) { /* 3rd way: ask their CoFLink directly */
-            Answer *a = answer_for(id, false);
-            if (a && a->lobby && t - a->at < 15000) {
-                lob = a->lobby;
-            } else if (S.Friends_GetFriendPersonaState(F, id) != 0) { /* online */
-                u64 every = (in_coflink || in_cof) ? 4000 : 30000;
-                if (g_refresh == 1) every = 0; /* Refresh: ask everyone now */
-                if (!a) a = answer_for(id, true);
-                if (!a->asked || t - a->asked > every) {
-                    static const char q[2] = { 'Q', PROTO[0] };
-                    send_ctl_data(id, q, 2);
-                    a->asked = t;
-                }
+        Answer *a = answer_for(id, false);
+        if (!host && a && a->lobby && t - a->at < 15000 && (!lob || a->lobby == lob)) { lob = a->lobby; host = true; }
+        if (!host && S.Friends_GetFriendPersonaState(F, id) != 0) { /* online: ask their CoFLink directly */
+            u64 every = (in_coflink || in_cof) ? 4000 : 30000;
+            if (g_refresh == 1) every = 0; /* Refresh: ask everyone now */
+            if (!a) a = answer_for(id, true);
+            if (!a->asked || t - a->asked > every) {
+                static const char q[2] = { 'Q', PROTO[0] };
+                send_ctl_data(id, q, 2);
+                a->asked = t;
             }
         }
-        if (!lob && !in_coflink) continue;
-        if (!lob) {
+        if (!host) {
+            if (lob || !in_coflink) continue; /* in someone's lobby as a player, or not in CoFLink */
             bool seen = false;
             for (int k = 0; k < nnoted; k++) seen |= noted[k] == id;
             if (!seen && nnoted < 32) {
@@ -894,10 +904,14 @@ static void join_tick(void)
     if (t - g_last_ka >= KEEPALIVE_MS) { send_ctl(g_host, 'K'); g_last_ka = t; }
     if (t - g_host_last > HOST_QUIET_MS && !g_host_warned) {
         g_host_warned = true;
-        say("! No answer from %s for 15 s. Is their CoFLink still open?", who(g_host));
+        g_warned_slow = !g_welcomed;
+        if (g_warned_slow) /* never reached them yet: usually a slow connection */
+            say("Still reaching %s through Steam (slow internet?). Keep waiting...", who(g_host));
+        else
+            say("! No answer from %s for 15 s. Is their CoFLink still open?", who(g_host));
     } else if (t - g_host_last < HOST_QUIET_MS && g_host_warned) {
         g_host_warned = false;
-        say("%s is back.", who(g_host));
+        if (!g_warned_slow) say("%s is back.", who(g_host)); /* else "Connected to ..." says it */
     }
     if (g_up && !g_down && !g_warned_no_answer && t - g_first_up_ms > 10000) {
         g_warned_no_answer = true;
