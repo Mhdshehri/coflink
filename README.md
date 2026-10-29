@@ -128,4 +128,4 @@ The tests cover:
 
 The relay pattern comes from the [Co-op Anything](https://github.com/cranebeaker/coop-anything) playbook (HXCoop / Steam Spacewar networking). Cry of Fear is made by Team Psykskallar. CoFLink is not affiliated with Team Psykskallar or with Valve.
 
-Released under the MIT license.
+CoFLink's own code is released under the [MIT license](LICENSE). `steam_api.dll`, which ships in the release zip, is Valve Corporation's Steamworks redistributable (from Steamworks.NET 2025.164.1). It is not covered by the MIT license; it is distributed under the Steamworks SDK terms.
