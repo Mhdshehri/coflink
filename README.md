@@ -17,7 +17,7 @@ You don't install anything, and you don't need admin rights or router settings. 
 
 ## Quick start
 
-Both players: download `CoFLink-<version>.zip` from [Releases](../../releases), unzip it anywhere, and open **CoFLink.exe**. Steam must be running. You both need the same version.
+Both players: download `CoFLink-<version>.zip` from [Releases](../../releases), unzip it anywhere, and open **CoFLink.exe**. Steam must be running, you both need the same version, and the host must be on your Steam friends list. Up to 4 players (host + 3).
 
 ### 🎮 Host
 
@@ -51,7 +51,7 @@ That's it. CoFLink only *links* you; you join from the game yourself. It doesn't
 ```
 
 - **Lobbies and the relay** come from Valve's free *Spacewar* test app (AppID 480), which every Steam account can use. While CoFLink is open, Steam shows you as "playing Spacewar". Nobody has to install or buy anything extra.
-- **Finding the host:** CoFLink looks at your Steam friends to see who is hosting. Asking a host's CoFLink directly still works after the host has started Cry of Fear.
+- **Finding the host:** CoFLink lists the Steam friends who are actually hosting. A friend who only joined someone else's game is not listed. It asks a host's CoFLink directly, which still works after the host has started Cry of Fear.
 - **The game is never modified.** Nothing is injected, and no game files change. Cry of Fear's own netcode keeps everyone in sync. CoFLink passes its packets along unchanged and in order, adding about 1–2 ms.
 
 ## Safety and privacy
@@ -102,15 +102,15 @@ The tests run on Linux with a mock Steam and a fake Cry of Fear server, under Ad
 mkdir -p build
 SRC="src/coflink.c src/lobbycode.c src/ui_console.c src/plat_posix.c test/steam_mock.c"
 gcc -std=c11 -fsanitize=address,undefined -o build/coflink_mock $SRC
-gcc -std=c11 -fsanitize=address,undefined -DVERSION='"0.10.1"' -o build/coflink_mock_new $SRC
+gcc -std=c11 -fsanitize=address,undefined -DVERSION='"9.9.9"' -o build/coflink_mock_new $SRC
 python3 test/run_tests.py  # prints ALL OK
 ```
 
 The tests cover:
 - **Play:** friends playing through the relay; packets arriving byte-exact and in order; level-load bursts; latency; 10% packet loss.
 - **Safety:** strangers blocked; direct connections turned off; foreign lobbies refused; kicking, including a kicked friend trying again with the code.
-- **Finding the host:** every discovery path, including a host who has already started Cry of Fear; lobby codes; Refresh.
-- **Everyday use:** Steam invites never joining anything; CoFLink never connecting the game itself; the server-up check; quitting, reconnecting and switching modes; alerts; version notices; starting `cof.exe` directly.
+- **Finding the host:** every discovery path, including a host who has already started Cry of Fear; only real hosts listed (not friends who just joined); the host must be your friend; lobby codes; Refresh.
+- **Everyday use:** Steam invites never joining anything; CoFLink never connecting the game itself; the server-up check; quitting, reconnecting and switching modes; alerts; the How to steps ticking as you go; version notices; a slow first connection; starting `cof.exe` directly.
 
 ## Project layout
 
@@ -123,6 +123,10 @@ The tests cover:
 | `src/plat_win.c` | Windows sockets, clipboard and process helpers |
 | `src/lobbycode.c` | Short lobby codes like `1MCE-2B2` |
 | `src/sha256.c` | Checks `steam_api.dll` before it is loaded |
+| `src/crt0_win.c`, `src/*.h` | Program start-up and the small headers |
+| `res/` | Icon, Windows manifest and version info |
+| `package/` | The player guide and license that go in the zip |
+| `build_windows.sh` | Builds `CoFLink.exe` |
 | `test/` | Mock Steam and the end-to-end tests |
 
 ## Credits

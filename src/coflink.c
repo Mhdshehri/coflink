@@ -3,7 +3,7 @@
  * Host:  creates a friends-only Steam lobby (through Valve's free "Spacewar"
  *        test app, AppID 480) and forwards each friend's
  *        packets into the host's own Cry of Fear co-op server on 127.0.0.1:27015.
- * Join:  finds the host among Steam friends (or by lobby id), joins the lobby,
+ * Join:  finds the host among Steam friends (or by lobby code), joins the lobby,
  *        and opens 127.0.0.1:27115; the friend then connects from Cry of Fear's
  *        own console (connect 127.0.0.1:27115). CoFLink only links; it does not
  *        connect the game itself and does not use Steam invites.
@@ -15,7 +15,7 @@
 #include "ui.h"
 
 #ifndef VERSION /* the tests build a second copy with a different version */
-#define VERSION "0.9.6"
+#define VERSION "1.0"
 #endif
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
@@ -456,7 +456,7 @@ static void on_lobby_entered(u64 lobby, uint32_t response)
     }
     version_note(owner, S.MM_GetLobbyData(MM, lobby, "coflink_ver"));
     g_lobby = lobby;
-    g_host = S.MM_GetLobbyOwner(MM, lobby);
+    g_host = owner;
     g_host_last = now_ms();
     say("Joined %s's Cry of Fear lobby. Connecting to them through Steam...", who(g_host));
     S.Friends_SetRichPresence(F, "status", "Playing Cry of Fear co-op (CoFLink)");
