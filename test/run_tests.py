@@ -490,20 +490,28 @@ def main():
         check("Found user1091" not in jx.log, "someone who isn't the host's friend gets no answer")
         jx.stop(); hq.stop()
 
-        print("[17] server-info replies pass through unchanged")
+        print("[17] Cry of Fear's server list sees the host's game (info answered by CoFLink)")
         hf = Proc("HF", dict(base, MOCK_ID="1101", MOCK_FRIENDS="1102"), ["host"])
         jf = Proc("JF", dict(base, MOCK_ID="1102", MOCK_FRIENDS="1101"), ["join", "--no-launch", "--yes"])
         procs += [hf, jf]
         pf = local_port(jf)
         jf.wait_for(r"Connected to user1101")
         check(jf.wait_for(r"user1101's Cry of Fear co-op game is up") is not None, "joiner checked the host's server")
-        qs = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); qs.bind(("127.0.0.1", 0)); qs.settimeout(2)
-        qs.sendto(b"\xff\xff\xff\xffTSource Engine Query\0", ("127.0.0.1", pf))
-        try: rep = qs.recvfrom(4096)[0]
-        except socket.timeout: rep = b""
-        check(rep == INFO_M, "the server's own reply arrives byte-for-byte (nothing rewritten)")
+        time.sleep(0.5)
+        for label, q in (("Steam's newer query (with challenge)", b"\xff\xff\xff\xffTSource Engine Query\0\xff\xff\xff\xff"),
+                         ("the old query", b"\xff\xff\xff\xffTSource Engine Query\0")):
+            qs = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); qs.bind(("127.0.0.1", 0)); qs.settimeout(2)
+            qs.sendto(q, ("127.0.0.1", pf))
+            try: rep = qs.recvfrom(4096)[0]
+            except socket.timeout: rep = b""
+            info = parse_info_I(rep)
+            check(info is not None and info["gameid"] == 223710, f"{label}: answered as Cry of Fear (app 223710)")
+            check(info is not None and info["name"] == "KaZ game" and info["map"] == "cof_intro"
+                  and info["players"] == 1 and info["max"] == 4 and info["rest"] == 0,
+                  f"{label}: the host server's real name, map and players")
+        check(jf.wait_for(r"Showing user1101's game in Cry of Fear's server list") is not None, "the log says so once")
         n, exact, ordered = stream_test(pf, 300)
-        check(n == 300 and exact and ordered, "ordinary game packets pass unchanged")
+        check(n == 300 and exact and ordered, "game packets still pass unchanged")
         hf.stop(); jf.stop()
 
         print("[20] a server that asks for a challenge first is still seen as up")
@@ -628,15 +636,32 @@ def main():
         check("Found user1151" not in jn2.log, "not on the host's friends list: host stays hidden")
         jn2.stop(); hg.stop()
 
-        print("[23] linking adds 127.0.0.1:<port> to Cry of Fear's Favorites")
+        print("[23] Add to Favorites: only when the player asks")
         hfv = Proc("HFV", dict(base, MOCK_ID="1161", MOCK_FRIENDS="1162"), ["host"])
-        jfv = Proc("JFV", dict(base, MOCK_ID="1162", MOCK_FRIENDS="1161"), ["join", "--no-launch", "--yes"])
-        procs += [hfv, jfv]
-        check(jfv.wait_for(r"favorite added: app 223710, 127\.0\.0\.1:27115 \(query 27115\), flags 1, time now") is not None,
-              "Favorites entry for Cry of Fear (app 223710) at this PC's CoFLink port, marked as a favorite")
-        check(jfv.wait_for(r"Added 127\.0\.0\.1:27115 to Cry of Fear's Favorites") is not None, "and the log says where to find it")
-        check(hfv.log.count("favorite added") == 0, "the host doesn't add one")
-        jfv.stop(); hfv.stop()
+        procs.append(hfv)
+        hfv.wait_for(r"Lobby is ready")
+        e = dict(os.environ, **base, MOCK_ID="1162", MOCK_FRIENDS="1161", ASAN_OPTIONS="detect_leaks=0")
+        fq = subprocess.Popen([BIN, "join", "--no-launch", "--yes"], env=e, stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        flog = []
+        threading.Thread(target=lambda: [flog.append(l) for l in fq.stdout], daemon=True).start()
+        def fwait(pat, t=8):
+            end = time.time() + t
+            while time.time() < end:
+                if re.search(pat, "".join(flog)): return True
+                time.sleep(0.05)
+            return False
+        check(fwait(r"Connected to user1161"), "linked")
+        time.sleep(1.5)
+        check("favorite added" not in "".join(flog), "linking alone adds nothing to Favorites")
+        fq.stdin.write("F\n"); fq.stdin.flush()
+        check(fwait(r"favorite added: app 223710, 127\.0\.0\.1:27115 \(query 27115\), flags 1, time now"),
+              "the button adds Cry of Fear (app 223710) at 127.0.0.1:27115 as a favorite")
+        check(fwait(r"Added 127\.0\.0\.1:27115 to Cry of Fear's Favorites"), "and the log says where to find it")
+        fq.send_signal(signal.SIGINT)
+        try: fq.wait(5)
+        except subprocess.TimeoutExpired: fq.kill()
+        hfv.stop()
 
         print("[8] bad internet: 10% of packets lost each way")
         h3 = Proc("H3", dict(base, MOCK_ID="1021", MOCK_FRIENDS="1022", MOCK_LOSS="10"), ["host"])

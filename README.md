@@ -4,7 +4,7 @@ Play **Cry of Fear** co-op with a Steam friend: no VPN (no Hamachi or Radmin), n
 
 The host runs the game's own co-op server on their PC. CoFLink carries the game traffic through Steam's relay network, so your friend joins from Steam.
 
-**Download:** grab `CoFLink-0.8.2.zip` from [Releases](../../releases). Both players unzip it and open `CoFLink.exe`. (Beta: the connection has been played in a real two-player session; the window is new.)
+**Download:** grab `CoFLink-0.8.3.zip` from [Releases](../../releases). Both players unzip it and open `CoFLink.exe`. (Beta: the connection has been played in a real two-player session; the window is new.)
 
 ## How to play
 
@@ -18,8 +18,9 @@ CoFLink is one program with a simple window for both players, in dark mode by de
 1. Click **Join a friend**, pick the host under *Friends hosting* and click **Join**
    (or paste the host's short lobby code, like `1MCE-2B2`, and click **Join this code**). Click **Refresh** to look again right away. Steam invites are not used.
 2. When the log says the host's co-op game is up: click **Start Cry of Fear**, then in the game
-   **Find servers → Favorites → 127.0.0.1:27115 → Connect** (CoFLink adds that favorite when you link),
-   or press `~`, then `Ctrl+V` and Enter (`connect 127.0.0.1:27115` is already copied).
+   press `~`, then `Ctrl+V` and Enter (`connect 127.0.0.1:27115` is already copied).
+   Or click **Add to Favorites** once (it appears after you link) and join from
+   **Find servers → Favorites → 127.0.0.1:27115**, which shows the host's game name, map and players.
 
 See [package/README.txt](package/README.txt) for the full guide, troubleshooting and low-FPS tips.
 
@@ -62,13 +63,13 @@ The tests run on Linux, with a mock Steam and a fake game server:
 
 ```sh
 mkdir -p build
-gcc -std=c11 -fsanitize=address,undefined -o build/coflink_mock src/coflink.c src/lobbycode.c src/ui_console.c src/plat_posix.c test/steam_mock.c
+gcc -std=c11 -fsanitize=address,undefined -o build/coflink_mock src/coflink.c src/a2s.c src/lobbycode.c src/ui_console.c src/plat_posix.c test/steam_mock.c
 python3 test/run_tests.py   # prints ALL OK
 ```
 
 The engine (`src/coflink.c`) is shared by the window (`src/ui_win.c`) and a text front end (`src/ui_console.c`) that the tests drive.
 
-The tests cover: two friends playing through the relay; packets arriving exact and in order; level-load bursts; latency; strangers being blocked; quit and reconnect; foreign lobbies being refused; join confirmation; finding the host through rich presence and by asking a friend's CoFLink directly (host opened first); joining by short lobby code; Refresh finding a new host right away; finding a host who already started Cry of Fear (Steam shows "playing Cry of Fear"); adding the Cry of Fear Favorites entry; Steam invites never joining anything; CoFLink never connecting the game itself; checking the host's co-op server is up (also with challenge-first servers); server-info replies passing unchanged; the game and other local programs sharing the relay; version checks; starting cof.exe directly; stopping, then switching between hosting and joining; and 10% packet loss.
+The tests cover: two friends playing through the relay; packets arriving exact and in order; level-load bursts; latency; strangers being blocked; quit and reconnect; foreign lobbies being refused; join confirmation; finding the host through rich presence and by asking a friend's CoFLink directly (host opened first); joining by short lobby code; Refresh finding a new host right away; finding a host who already started Cry of Fear (Steam shows "playing Cry of Fear"); adding the Favorites entry only when asked; the host's game showing in the in-game server list (both server-query formats); Steam invites never joining anything; CoFLink never connecting the game itself; checking the host's co-op server is up (also with challenge-first servers); server-info replies passing unchanged; the game and other local programs sharing the relay; version checks; starting cof.exe directly; stopping, then switching between hosting and joining; and 10% packet loss.
 
 ## Credits
 

@@ -14,7 +14,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.8.2"
+#define VERSION "0.8.3"
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
 #define SPACEWAR_APPID 480
@@ -262,8 +262,15 @@ static u64 g_slot_used[NSLOT];
 static bool g_welcomed, g_host_warned, g_said_down, g_warned_no_answer;
 static u64 g_host_last, g_last_hello, g_last_ka, g_up, g_down, g_first_up_ms;
 /* CoFLink checks the host's co-op server answers, to tell the friend when to connect */
-static bool g_server_ready, g_said_wait_server, g_said_ready;
+static bool g_server_ready, g_said_wait_server, g_said_ready, g_said_answered;
 static u64 g_last_probe, g_welcomed_ms;
+/* The host server's real info, refreshed by that check, in the standard reply
+   format with Cry of Fear's app id. Cry of Fear's server list asks through
+   Steam in a newer format that Cry of Fear's old server ignores, so CoFLink
+   answers that one question itself (game data is never changed). */
+static uint8_t g_info[2048];
+static int g_info_len;
+int a2s_fix_appid(const uint8_t *in, int n, uint8_t *out, int cap, uint32_t appid);
 static u64 g_rejected[16];
 static int g_nrejected;
 /* Direct discovery: "are you hosting?" ('Q') to friends running CoFLink;
@@ -289,8 +296,9 @@ static Answer *answer_for(u64 friend_, bool make)
 
 static void reset_connect_state(void)
 {
-    g_server_ready = g_said_wait_server = g_said_ready = false;
+    g_server_ready = g_said_wait_server = g_said_ready = g_said_answered = false;
     g_last_probe = g_welcomed_ms = 0;
+    g_info_len = 0;
 }
 
 static void reset_join_state(void)
@@ -336,20 +344,21 @@ static bool open_game_socket(void)
     return false;
 }
 
-/* Put this PC's CoFLink address in Cry of Fear's Favorites (Steam keeps the
-   list), so the friend can also join from the game's Servers -> Favorites tab.
-   It's always 127.0.0.1 (this PC), whoever the host is. */
+/* "Add to Favorites" button: put this PC's CoFLink address in Cry of Fear's
+   Favorites (Steam keeps the list; an address already there isn't added
+   twice). It's always 127.0.0.1 (this PC), whoever the host is. Only when the
+   player clicks the button. */
 static void add_favorite(void)
 {
-    static uint16_t added[4];
-    for (int i = 0; i < 4; i++) if (added[i] == g_local_port) return;
+    if (g_mode != MODE_JOIN || !g_lobby) { say("! Link to a host first, then add to Favorites."); return; }
     if (!S.MM_AddFavoriteGame) return;
     int r = S.MM_AddFavoriteGame(MM, COF_APPID, 0x7F000001u /* 127.0.0.1 */, g_local_port, g_local_port,
                                  1 /* favorite */, unix_time());
-    for (int i = 0; i < 4; i++) if (!added[i]) { added[i] = g_local_port; break; }
     if (r >= 0)
         say("Added 127.0.0.1:%u to Cry of Fear's Favorites (in the game: Find servers -> Favorites).",
             (unsigned)g_local_port);
+    else
+        say("! Steam would not add it to Favorites. Use the console: connect 127.0.0.1:%u", (unsigned)g_local_port);
 }
 
 static void joined_message(void)
@@ -360,8 +369,8 @@ static void joined_message(void)
     say("");
     say("=== Linked to %s. Now join from the game: ===", who(g_host));
     say("1. Click \"Start Cry of Fear\" (or start it from Steam).");
-    say("2. Find servers -> Favorites tab -> pick 127.0.0.1:%u -> Connect.", (unsigned)g_local_port);
-    say("   Or in the main menu press ~, then Ctrl+V and Enter (already copied):   %s", cmd);
+    say("2. In the main menu press ~, then Ctrl+V and Enter (already copied):   %s", cmd);
+    say("   Or click \"Add to Favorites\" once, then join from Find servers -> Favorites.");
     say("");
 }
 
@@ -399,7 +408,7 @@ static void on_lobby_entered(u64 lobby, uint32_t response)
     S.Friends_SetRichPresence(F, "status", "Playing Cry of Fear co-op (CoFLink)");
     send_ctl(g_host, 'H');
     g_last_hello = now_ms();
-    if (open_game_socket()) { add_favorite(); joined_message(); }
+    if (open_game_socket()) joined_message();
 }
 
 /* ---------- host: lobby + invites ---------- */
@@ -778,6 +787,18 @@ static void on_probe_reply(const uint8_t *b, int len)
         g_server_ready = true;
         say("%s's Cry of Fear co-op game is up.", who(g_host));
     }
+    int fixed = a2s_fix_appid(b, len, g_info, (int)sizeof g_info, COF_APPID);
+    if (fixed > 0) {
+        g_info_len = fixed;
+    } else if (len >= 6 && len <= (int)sizeof g_info && b[4] == 'I') {
+        memcpy(g_info, b, (size_t)len); /* already a standard reply with the right id */
+        g_info_len = len;
+    }
+}
+
+static bool is_info_query(const uint8_t *b, int n)
+{
+    return n >= 25 && b[0] == 0xFF && b[1] == 0xFF && b[2] == 0xFF && b[3] == 0xFF && b[4] == 'T';
 }
 
 /* Join side: say when the host's co-op game is up, so the friend knows to
@@ -812,6 +833,14 @@ static void join_tick(void)
         if (r < 0) break;
         if (r == 0 || r > MAX_GAME_PKT || !g_lobby) continue;
         g_game_ip = ip;
+        if (is_info_query(g_buf, r) && g_info_len) { /* the server list asking about the host's game */
+            udp_sendto(g_game_sock, g_info, g_info_len, ip, port);
+            if (!g_said_answered) {
+                g_said_answered = true;
+                say("(Showing %s's game in Cry of Fear's server list.)", who(g_host));
+            }
+            continue;
+        }
         bool first = !g_up;
         int slot = slot_for(port, t);
         if (first) say("Cry of Fear is talking to CoFLink. Passing it to %s...", who(g_host));
@@ -820,8 +849,9 @@ static void join_tick(void)
     }
     if (!g_lobby) return;
     if (!g_welcomed && t - g_last_hello > 2000) { send_ctl(g_host, 'H'); g_last_hello = t; }
-    /* check the host's co-op server answers (every 2 s until it does) */
-    if (g_welcomed && !g_server_ready && t - g_last_probe > 2000) {
+    /* check the host's co-op server answers: every 2 s until it does, then
+       every 5 s to keep its info (map, players) fresh for the server list */
+    if (g_welcomed && t - g_last_probe > (g_server_ready ? 5000u : 2000u)) {
         probe_server(0);
         g_last_probe = t;
     }
@@ -1045,6 +1075,7 @@ static void handle_cmd(const Cmd *c)
         if (g_mode != MODE_JOIN) start_mode(MODE_JOIN);
         if (g_mode == MODE_JOIN) { g_joining = 0; request_join(c->arg); }
         break;
+    case CMD_FAVORITE: add_favorite(); break;
     case CMD_LAUNCH: /* "Start Cry of Fear" */
         start_game();
         break;
