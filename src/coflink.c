@@ -15,7 +15,7 @@
 #include "ui.h"
 
 #ifndef VERSION /* the tests build a second copy with a different version */
-#define VERSION "0.9.4"
+#define VERSION "0.9.5"
 #endif
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
@@ -417,11 +417,7 @@ static void joined_message(void)
     char cmd[64];
     sfmt(cmd, sizeof cmd, "connect 127.0.0.1:%u", (unsigned)g_local_port);
     clipboard_set(cmd);
-    say("");
-    say("=== Linked to %s. Now join from the game: ===", who(g_host));
-    say("1. Click \"Start Cry of Fear\" (or start it from Steam).");
-    say("2. In the main menu press ~, then Ctrl+V and Enter (already copied):   %s", cmd);
-    say("");
+    say("Linked to %s. Connect command copied: %s", who(g_host), cmd); /* the steps are in "How to" */
 }
 
 static void on_lobby_entered(u64 lobby, uint32_t response)
@@ -483,14 +479,7 @@ static void on_lobby_created(int32_t result, u64 lobby)
        button, which only launches Spacewar. */
     S.Friends_SetRichPresence(F, "coflink_lobby", idstr(lobby));
     clipboard_set(codestr(lobby));
-    say("");
-    say("=== Lobby is ready (code %s, copied to clipboard) ===", codestr(lobby));
-    say("1. Start Cry of Fear and create your co-op server as usual (Co-op -> Create game).");
-    say("   In the console (~) type:  sv_lan 1   (your friends will look like LAN players)");
-    say("2. Your friend opens CoFLink and clicks \"Join a friend\" (if you don't show up,");
-    say("   send them the lobby code above to paste into their CoFLink).");
-    say("   Once linked, they connect from their game's console:  connect 127.0.0.1:27115");
-    say("");
+    say("Lobby is ready (code %s, copied to clipboard). Friends can link now.", codestr(lobby));
 }
 
 /* Host: the friends linked through CoFLink right now (shown in the window). */
@@ -1072,6 +1061,13 @@ static void make_status(UiState *st)
     st->mode = g_mode;
     st->lobby = g_lobby;
     st->local_port = g_local_port;
+    if (g_is_host) { /* progress for the "How to" steps */
+        int linked = g_npeers, answered = 0, playing = 0;
+        for (int i = 0; i < g_npeers; i++) { answered += g_peers[i].down > 0; playing += g_peers[i].down >= 50; }
+        st->done = (g_lobby ? 1 : 0) | (answered ? 2 : 0) | (linked ? 4 : 0) | (playing ? 8 : 0);
+    } else if (g_mode == MODE_JOIN) {
+        st->done = (g_lobby && g_welcomed ? 1 : 0) | (g_server_ready ? 2 : 0) | (g_down > 0 ? 4 : 0) | (g_down >= 50 ? 8 : 0);
+    }
     if (g_mode == MODE_IDLE) {
         sfmt(st->status, sizeof st->status, g_steam_ok ? "Ready. Host a game, or join a friend." :
              "Choose Host a game or Join a friend.");

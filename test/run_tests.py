@@ -236,6 +236,11 @@ def main():
         check(a.wait_for(r"host's server answered") is not None, "A was told the server answered")
         check(host.wait_for(r"Your server answered user1002") is not None, "host was told A is loading in")
         check(host.log.count("[alert] friend linked") == 2, "the host's window alerted once per friend who linked")
+        check(host.wait_for(r"\[how-to\] steps done: 15") is not None and a.wait_for(r"\[how-to\] steps done: 15") is not None,
+              "How to: all 4 steps ticked for host and friend once they play")
+        seq = [int(x) for x in re.findall(r"steps done: (\d+)", a.log)]
+        check(len(seq) >= 2 and seq[-1] == 15 and all(seq[i] & ~seq[i + 1] == 0 for i in range(len(seq) - 1)),
+              f"How to: the friend's ticks only ever add up, never jump back ({seq})")
         check("CoFLink (" not in a.log + host.log, "same version: no version notice")
         check("[mock] global config 104 = 0" in host.log and "[mock] global config 104 = 0" in a.log,
               "both sides turn off direct connections (IP never shared, always Valve's relay)")
@@ -385,7 +390,8 @@ def main():
         jz = Proc("JZ", dict(base, MOCK_ID="1052", MOCK_FRIENDS="1051", MOCK_COF="1"), ["join", "--yes"])
         procs.append(jz)
         check(jz.wait_for(r"Connected to user1051") is not None, "joiner linked to the host")
-        check(jz.wait_for(r"Now join from the game", 5) is not None, "joiner is told to join from the game")
+        check(jz.wait_for(r"Linked to user\d+\. Connect command copied: connect 127\.0\.0\.1:\d+", 5) is not None,
+              "joiner is told it is linked (the steps are in How to)")
         check(jz.wait_for(r"Waiting for user1051 to start their co-op game", 10) is not None,
               "host's co-op game not running: joiner says it is waiting")
         jz.stop(); hz.stop()

@@ -27,6 +27,7 @@ IMP BOOL WINAPI Process32First(HANDLE snap, void *entry);
 IMP BOOL WINAPI Process32Next(HANDLE snap, void *entry);
 IMP BOOL WINAPI CloseHandle(HANDLE h);
 IMP DWORD WINAPI GetFileAttributesA(const char *path);
+IMP int WINAPI MultiByteToWideChar(UINT cp, DWORD flags, const char *s, int n, void *w, int wn);
 typedef struct { DWORD cb; char *reserved, *desktop, *title; DWORD x, y, w, h, cx, cy, fill, flags;
                  uint16_t show, reserved2; void *reserved3; HANDLE in, out, err; } StartupInfoA; /* 68 bytes */
 typedef struct { HANDLE process, thread; DWORD pid, tid; } ProcInfo;
@@ -164,16 +165,19 @@ void wait_socks(const sock_t *s, int n, int ms)
 
 void clipboard_set(const char *text)
 {
-    size_t n = strlen(text) + 1;
-    HANDLE h = GlobalAlloc(2 /* GMEM_MOVEABLE */, n);
+    /* As Unicode, so names in any language survive; Windows makes the plain
+       text version (what Cry of Fear's console pastes) from it. */
+    int wn = MultiByteToWideChar(65001 /* UTF-8 */, 0, text, -1, 0, 0);
+    if (wn <= 0) return;
+    HANDLE h = GlobalAlloc(2 /* GMEM_MOVEABLE */, (size_t)wn * 2);
     if (!h) return;
     void *p = GlobalLock(h);
     if (!p) { GlobalFree(h); return; }
-    memcpy(p, text, n);
+    MultiByteToWideChar(65001, 0, text, -1, p, wn);
     GlobalUnlock(h);
     if (!OpenClipboard(0)) { GlobalFree(h); return; }
     EmptyClipboard();
-    if (!SetClipboardData(1 /* CF_TEXT */, h)) GlobalFree(h); /* on success Windows owns it */
+    if (!SetClipboardData(13 /* CF_UNICODETEXT */, h)) GlobalFree(h); /* on success Windows owns it */
     CloseClipboard();
 }
 

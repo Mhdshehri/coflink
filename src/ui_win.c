@@ -156,7 +156,7 @@ IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 
 enum {
     ID_HOST = 101, ID_JOIN, ID_STOP, ID_STATUS, ID_LOBBY, ID_COPYID, ID_JOINID,
-    ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME,
+    ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME, ID_TAB_HOWTO, ID_TAB_LOG, ID_COPYLOG, ID_HOWTO,
     ID_LOBBYLABEL,
 };
 
@@ -173,7 +173,7 @@ static bool g_state_dirty;
 static UiPerson g_lists[2][64];
 static int g_nlist[2];
 static bool g_list_dirty[2];
-static bool g_alert;
+static bool g_alert, g_warned; /* g_warned: a "!" line arrived */
 static Cmd g_cmds[32];
 static int g_cmd_head, g_cmd_tail;
 
@@ -181,6 +181,7 @@ void ui_log(const char *line)
 {
     EnterCriticalSection(&g_cs);
     int n = (int)strlen(line);
+    if (line[0] == '!') g_warned = true;
     if (g_npend + n + 2 < (int)sizeof g_pend) {
         memcpy(g_pend + g_npend, line, (size_t)n);
         g_npend += n;
@@ -266,6 +267,8 @@ static u64 g_close_ms;
 static UiPerson g_view[2][64]; /* what the list box shows (GUI thread copy) */
 static int g_nview[2];
 static int g_list_shown = -1;
+static bool g_tab_log;     /* false: "How to" is shown in the box, true: the log */
+static bool g_log_unseen;  /* a warning arrived while "How to" was shown: red dot on Log */
 
 static int S_(int v) { return v * g_dpi / 96; }
 
@@ -336,6 +339,7 @@ static void apply_system_parts(void)
     if (theme) {
         const WCHAR *name = T.dark ? WTEXT("DarkMode_Explorer") : WTEXT("Explorer");
         theme(g_c[ID_LOG], name, 0);
+        theme(g_c[ID_HOWTO], name, 0);
         theme(g_c[ID_LIST], name, 0);
     }
 }
@@ -367,9 +371,47 @@ static void set_theme(bool dark)
 }
 
 static bool is_primary(UINT id) { return id == ID_HOST || id == ID_JOIN || id == ID_ACTION; }
+static bool is_tab(UINT id) { return id == ID_TAB_HOWTO || id == ID_TAB_LOG; }
+
+/* "How to" / "Log": the chosen one looks like a raised tab with a red line under it */
+static void draw_tab(DrawItem *d)
+{
+    bool on = (d->id == ID_TAB_LOG) == g_tab_log;
+    FillRect(d->dc, &d->rc, g_br_bg);
+    if (on) {
+        HBRUSH b = CreateSolidBrush(T.btn);
+        HANDLE p = CreatePen(0, 1, T.border);
+        HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
+        RoundRect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, S_(8), S_(8));
+        SelectObject(d->dc, ob);
+        SelectObject(d->dc, op);
+        DeleteObject(b);
+        DeleteObject(p);
+        RECT u = { d->rc.left + S_(10), d->rc.bottom - S_(3), d->rc.right - S_(10), d->rc.bottom - S_(1) };
+        FillRect(d->dc, &u, g_br_accent);
+    }
+    WCHAR w[32];
+    int n = GetWindowTextW(d->hwnd, w, 32);
+    HANDLE of = SelectObject(d->dc, on ? g_bold : g_font);
+    SetBkMode(d->dc, TRANSPARENT_BK);
+    SetTextColor(d->dc, on ? T.text : T.dim);
+    RECT tr = d->rc;
+    DrawTextW(d->dc, w, n, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(d->dc, of);
+    if (d->id == ID_TAB_LOG && g_log_unseen) { /* red dot: a warning is waiting in the log */
+        HANDLE p = CreatePen(0, 1, T.accent);
+        HANDLE ob = SelectObject(d->dc, g_br_accent), op = SelectObject(d->dc, p);
+        int r = S_(7), x = d->rc.right - S_(12), y = d->rc.top + S_(6);
+        RoundRect(d->dc, x, y, x + r, y + r, r, r);
+        SelectObject(d->dc, ob);
+        SelectObject(d->dc, op);
+        DeleteObject(p);
+    }
+}
 
 static void draw_button(DrawItem *d)
 {
+    if (is_tab(d->id)) { draw_tab(d); return; }
     bool down = d->state & ODS_SELECTED, off = d->state & ODS_DISABLED, focus = d->state & ODS_FOCUS;
     DWORD fill, text, edge;
     if (off) { fill = T.dis_bg; text = T.dis_text; edge = T.dis_bg; }
@@ -426,7 +468,7 @@ static void draw_list_item(DrawItem *d)
 static LRESULT control_colors(UINT msg, HDC dc, HWND ctl_)
 {
     if (ctl_ == g_c[ID_ACCENT]) return (LRESULT)g_br_accent;
-    bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY];
+    bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY] || ctl_ == g_c[ID_HOWTO];
     SetTextColor(dc, (ctl_ == g_c[ID_LISTLABEL] || ctl_ == g_c[ID_LOBBYLABEL]) ? T.dim : T.text);
     SetBkColor(dc, box ? T.panel : T.bg);
     return (LRESULT)(box ? g_br_panel : g_br_bg);
@@ -495,7 +537,12 @@ static void build(void)
     ctl(ID_REFRESH, B, WTEXT("Refresh"), OD, 0, 452, 230, 134, 30, g_font);
     ctl(ID_LAUNCH, B, WTEXT("Start Cry of Fear"), OD, 0, 14, 312, 180, 30, g_font);
     ctl(ID_COPYCONN, B, WTEXT("Copy connect command"), OD, 0, 204, 312, 200, 30, g_font);
-    framed(ID_LOG, E, WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 14, 352, 572, 212, 7, 5);
+    ctl(ID_TAB_HOWTO, B, WTEXT("How to"), OD, 0, 14, 350, 96, 28, g_font);
+    ctl(ID_TAB_LOG, B, WTEXT("Log"), OD, 0, 114, 350, 80, 28, g_font);
+    ctl(ID_COPYLOG, B, WTEXT("Copy log"), OD, 0, 486, 350, 100, 26, g_font);
+    /* one box: "How to" and the log take turns in it */
+    framed(ID_LOG, E, WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 14, 384, 572, 180, 7, 5);
+    ctl(ID_HOWTO, E, WTEXT(""), WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 14 + 7, 384 + 5, 572 - 14, 180 - 10, g_font);
     SendMessageW(g_c[ID_LOG], EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
 }
 
@@ -524,6 +571,103 @@ static void show_list(int which)
         SendMessageW(lb, LB_ADDSTRING, 0, (LPARAM)wide(g_view[which][i].name, w, UI_NAME + 8));
     if (g_nview[which] == 1) SendMessageW(lb, LB_SETCURSEL, 0, 0);
     g_list_shown = which;
+}
+
+/* ---------- "How to": what to do next, for the host or the friend ---------- */
+
+static const char *mark(const UiState *s, int bit, int first_open)
+{
+    /* plain characters on purpose: every Windows font has them */
+    if (s->done & (1 << bit)) return "[x] ";          /* done */
+    return bit == first_open ? "[>] " : "[  ] ";       /* [>] = you are here */
+}
+
+static void build_howto(const UiState *s, char *o, int n)
+{
+    int open = 0;
+    while (open < 4 && (s->done & (1 << open))) open++;
+    char port[8];
+    sfmt(port, sizeof port, "%u", (unsigned)(s->local_port ? s->local_port : 27115));
+    if (s->mode == MODE_HOST) {
+        sfmt(o, n,
+            "HOSTING - the others join your game\r\n\r\n"
+            "%s1. Lobby ready. Friends find you under \"Join a friend\" (or click Copy code and send it).\r\n"
+            "%s2. Click \"Start Cry of Fear\" -> Co-op -> create a game -> choose LAN.\r\n"
+            "%s3. A friend links: they show up in the list above (CoFLink flashes).\r\n"
+            "%s4. They join from their game console. Have fun!\r\n\r\n"
+            "WATCH OUT\r\n"
+            "- Keep CoFLink open the whole time you play.\r\n"
+            "- Only people on your Steam friends list can link. Kick removes someone until you click Stop.\r\n"
+            "- The player with the best PC and internet should host.\r\n"
+            "- A friend says the server isn't answering? You haven't started the co-op game yet.\r\n"
+            "- Same CoFLink version and same game files on both PCs (Steam -> Verify integrity).",
+            mark(s, 0, open), mark(s, 1, open), mark(s, 2, open), mark(s, 3, open));
+    } else if (s->mode == MODE_JOIN) {
+        sfmt(o, n,
+            "JOINING - you join your friend's game\r\n\r\n"
+            "%s1. Pick the host and click Join (or paste their code). Not listed? Click Refresh.\r\n"
+            "%s2. Wait until the host's co-op game is up (CoFLink flashes).\r\n"
+            "%s3. Click \"Start Cry of Fear\". In the main menu press ~, then Ctrl+V and Enter.\r\n"
+            "      (connect 127.0.0.1:%s is already copied; \"Copy connect command\" copies it again.)\r\n"
+            "%s4. You're in. Have fun!\r\n\r\n"
+            "WATCH OUT\r\n"
+            "- Join with the console only. The game's server list and Steam's \"Join Game\" don't work.\r\n"
+            "- Keep CoFLink open the whole time you play.\r\n"
+            "- Same CoFLink version and same game files as the host (Steam -> Verify integrity).\r\n"
+            "- Players jumping around? Both type in the console:  rate 25000; cl_updaterate 60; cl_cmdrate 60",
+            mark(s, 0, open), mark(s, 1, open), mark(s, 2, open), port, mark(s, 3, open));
+    } else {
+        sfmt(o, n,
+            "HOW TO PLAY\r\n\r\n"
+            "One of you hosts (the game runs on their PC), the others join.\r\n\r\n"
+            "- HOST: click \"Host a game\".\r\n"
+            "- FRIEND: click \"Join a friend\".\r\n\r\n"
+            "Both of you need: Steam running and online, Cry of Fear from Steam,\r\n"
+            "and the same CoFLink version. You must be Steam friends.\r\n\r\n"
+            "Before your first game, both of you: Steam -> right-click Cry of Fear -> Properties\r\n"
+            "-> Installed Files -> Verify integrity of game files.\r\n\r\n"
+            "In the steps, [x] = done and [>] = what to do now.\r\n"
+            "Everything CoFLink does is in the Log (red dot = something needs a look).");
+    }
+}
+
+static void show_tab(bool log)
+{
+    g_tab_log = log;
+    if (log) g_log_unseen = false;
+    ShowWindow(g_c[ID_LOG], log ? 5 : 0);
+    ShowWindow(g_c[ID_HOWTO], log ? 0 : 5);
+    ShowWindow(g_c[ID_COPYLOG], log ? 5 : 0);
+    RedrawWindow(g_c[ID_TAB_HOWTO], 0, 0, 0x1 | 0x4);
+    RedrawWindow(g_c[ID_TAB_LOG], 0, 0, 0x1 | 0x4);
+}
+
+static void update_howto(void)
+{
+    static UiState last;
+    static bool first = true;
+    if (!first && last.mode == g_shown.mode && last.done == g_shown.done && last.local_port == g_shown.local_port) return;
+    first = false;
+    last = g_shown;
+    static char t[4096];
+    static WCHAR w[4096];
+    build_howto(&g_shown, t, sizeof t);
+    SetWindowTextW(g_c[ID_HOWTO], wide(t, w, 4096));
+}
+
+static void copy_log(void)
+{
+    HWND h = g_c[ID_LOG];
+    int n = (int)SendMessageW(h, WM_GETTEXTLENGTH, 0, 0);
+    WCHAR *w = malloc(((size_t)n + 1) * 2);
+    char *u = malloc((size_t)n * 3 + 1);
+    if (w && u) {
+        GetWindowTextW(h, w, n + 1);
+        WideCharToMultiByte(CP_UTF8, 0, w, -1, u, n * 3 + 1, 0, 0);
+        clipboard_set(u);
+    }
+    free(w);
+    free(u);
 }
 
 static void refresh_controls(void)
@@ -563,8 +707,8 @@ static void on_timer(void)
     n = g_npend;
     memcpy(pend, g_pend, (size_t)n);
     g_npend = 0;
-    bool alert = g_alert;
-    g_alert = false;
+    bool alert = g_alert, warned = g_warned;
+    g_alert = g_warned = false;
     st = g_state;
     st_dirty = g_state_dirty;
     g_state_dirty = false;
@@ -579,6 +723,10 @@ static void on_timer(void)
     LeaveCriticalSection(&g_cs);
 
     if (n) { pend[n] = 0; append_log(pend); }
+    if (warned && !g_tab_log && !g_log_unseen) { /* red dot on "Log" */
+        g_log_unseen = true;
+        RedrawWindow(g_c[ID_TAB_LOG], 0, 0, 0x1 | 0x4);
+    }
     if (alert && GetForegroundWindow() != g_wnd) { /* only when CoFLink isn't the window in front */
         FLASHWINFO f = { sizeof f, g_wnd, 0x3 | 0xC /* caption + taskbar, until it's clicked */, 0, 0 };
         FlashWindowEx(&f);
@@ -597,6 +745,7 @@ static void on_timer(void)
     for (int k = 0; k < 2; k++)
         if (ld[k] && g_list_shown == k) show_list(k);
     refresh_controls();
+    update_howto();
 
     if (g_closing && (WaitForSingleObject(g_thread, 0) == 0 || now_ms() - g_close_ms > 5000))
         DestroyWindow(g_wnd);
@@ -669,6 +818,12 @@ static void on_command(int id, int code)
         break;
     case ID_LAUNCH: push_cmd(CMD_LAUNCH, 0); break;
     case ID_REFRESH: push_cmd(CMD_REFRESH, 0); break;
+    case ID_TAB_HOWTO: show_tab(false); break;
+    case ID_TAB_LOG: show_tab(true); break;
+    case ID_COPYLOG:
+        copy_log();
+        ui_log("(Log copied. Paste it with Ctrl+V.)");
+        break;
     case ID_THEME:
         set_theme(!T.dark);
         save_theme();
@@ -781,10 +936,7 @@ int main(int argc, char **argv)
     if (!g_wnd) return 1;
     build();
     set_theme(T.dark); /* button label, title bar, scrollbars */
-    ui_log("HOST: click \"Host a game\", then \"Start Cry of Fear\" and create a LAN co-op game.");
-    ui_log("FRIEND: click \"Join a friend\" and pick the host (or paste their lobby code).");
-    ui_log("        Once linked: start Cry of Fear, press ~ and paste  connect 127.0.0.1:27115");
-    ui_log("");
+    show_tab(false); /* start on "How to" */
     on_timer();
     ShowWindow(g_wnd, 1);
     UpdateWindow(g_wnd);

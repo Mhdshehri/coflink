@@ -22,7 +22,12 @@ void ui_log(const char *line)
 
 void ui_alert(const char *what) { printf("[alert] %s\n", what); fflush(0); }
 
-void ui_state(const UiState *s) { g_mode = s->mode; }
+void ui_state(const UiState *s)
+{
+    static int last_done = -1;
+    g_mode = s->mode;
+    if (s->done != last_done) { printf("[how-to] steps done: %d\n", s->done); fflush(0); last_done = s->done; }
+}
 
 void ui_list(int which, int n, const UiPerson *p)
 {

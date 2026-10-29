@@ -76,6 +76,7 @@ As with any game server, only play with people you trust.
 ## Features
 
 - One small program for both players, with a dark theme by default and a light theme.
+- **How to** shows your steps as you go (`[x]` done, `[>]` do this now). **Log** shows everything that happened, with a red dot when something needs a look, and a **Copy log** button.
 - Finds friends who are hosting automatically, with a **Refresh** button and short lobby codes.
 - **Start Cry of Fear** runs the game directly, skipping its launcher.
 - Alerts when a friend links, or when the host's game is up.

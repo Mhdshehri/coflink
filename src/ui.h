@@ -26,6 +26,7 @@ typedef struct {
     int mode;
     u64 lobby;            /* host: own lobby; join: lobby joined */
     uint16_t local_port;  /* join: where Cry of Fear connects */
+    uint8_t done;         /* "How to" steps finished, one bit each (see make_status) */
     char status[160];     /* one-line summary for the big status label */
 } UiState;
 
@@ -34,7 +35,7 @@ typedef struct { u64 id, lobby; char name[UI_NAME]; } UiPerson;
 
 enum { LIST_FRIENDS_ONLINE = 0 /* host: friends linked now */, LIST_HOSTING = 1 };
 
-void ui_log(const char *line);
+void ui_log(const char *line); /* lines starting with "!" are warnings */
 /* something the player is waiting for happened (a friend linked, the host's
    game is up): the window flashes in the taskbar and plays a short sound */
 void ui_alert(const char *what);
