@@ -628,6 +628,16 @@ def main():
         check("Found user1151" not in jn2.log, "not on the host's friends list: host stays hidden")
         jn2.stop(); hg.stop()
 
+        print("[23] linking adds 127.0.0.1:<port> to Cry of Fear's Favorites")
+        hfv = Proc("HFV", dict(base, MOCK_ID="1161", MOCK_FRIENDS="1162"), ["host"])
+        jfv = Proc("JFV", dict(base, MOCK_ID="1162", MOCK_FRIENDS="1161"), ["join", "--no-launch", "--yes"])
+        procs += [hfv, jfv]
+        check(jfv.wait_for(r"favorite added: app 223710, 127\.0\.0\.1:27115 \(query 27115\), flags 1, time now") is not None,
+              "Favorites entry for Cry of Fear (app 223710) at this PC's CoFLink port, marked as a favorite")
+        check(jfv.wait_for(r"Added 127\.0\.0\.1:27115 to Cry of Fear's Favorites") is not None, "and the log says where to find it")
+        check(hfv.log.count("favorite added") == 0, "the host doesn't add one")
+        jfv.stop(); hfv.stop()
+
         print("[8] bad internet: 10% of packets lost each way")
         h3 = Proc("H3", dict(base, MOCK_ID="1021", MOCK_FRIENDS="1022", MOCK_LOSS="10"), ["host"])
         j3 = Proc("J3", dict(base, MOCK_ID="1022", MOCK_FRIENDS="1021", MOCK_LOSS="10"), ["join", "--no-launch", "--yes"])

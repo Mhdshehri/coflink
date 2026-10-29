@@ -1,12 +1,13 @@
-CoFLink 0.8.1 (beta) - Cry of Fear co-op with a Steam friend
+CoFLink 0.8.2 (beta) - Cry of Fear co-op with a Steam friend
 =====================================================
 No VPN (no Hamachi/Radmin), no port forwarding, no IP addresses.
 One program for both players: open CoFLink.exe and click a button.
+Dark mode by default - the button at the top right switches to light.
 
 Both of you need: Windows, Steam running and logged in, Cry of Fear
 installed from Steam, and this whole folder (unzip it anywhere, e.g. Desktop).
 Keep CoFLink.exe and steam_api.dll together in the same folder.
-You BOTH need the same CoFLink version (0.8.1).
+You BOTH need the same CoFLink version (0.8.2).
 
 Before the first game, both of you: in Steam, right-click Cry of Fear ->
 Properties -> Installed Files -> "Verify integrity of game files".
@@ -37,8 +38,10 @@ CoFLink only LINKS you to the host. You join the game yourself.
 2. Wait for "...co-op game is up" in the log.
 3. Click "Start Cry of Fear" (starts the game without its launcher), or
    start it from Steam.
-4. In the game's main menu press ~ to open the console, paste with Ctrl+V
-   and press Enter. The command is already copied:
+4. In the game: Find servers -> Favorites tab -> 127.0.0.1:27115 -> Connect.
+   (CoFLink adds it to Cry of Fear's Favorites when you link. The address
+   is your own PC's CoFLink, so it works whoever hosts.)
+   Or: press ~ in the main menu, paste with Ctrl+V and press Enter:
        connect 127.0.0.1:27115
    (Button "Copy connect command" copies it again.)
 5. Keep CoFLink open while you play.
@@ -47,7 +50,9 @@ CoFLink only LINKS you to the host. You join the game yourself.
 IS IT SAFE?
 -----------
 - Nothing is installed, no settings or registry are changed. CoFLink only
-  writes steam_appid.txt (containing 480) into its own folder.
+  writes steam_appid.txt (containing 480) and coflink_theme.txt (dark or
+  light) into its own folder, and (for the friend) adds 127.0.0.1:27115 to
+  Cry of Fear's Favorites in Steam - remove it there any time.
   To remove it, delete the folder.
 - No ports are opened on your PC or router. CoFLink only talks to programs
   on your own PC (127.0.0.1) and to Steam.
@@ -109,7 +114,7 @@ TROUBLESHOOTING (read the log at the bottom of the window)
     Host/Join again.
 "steam_api.dll is not the expected file / missing": use the steam_api.dll
     from this zip, in the same folder as CoFLink.exe.
-Friend: the host never shows up:  check you both have CoFLink 0.8.1 and are
+Friend: the host never shows up:  check you both have CoFLink 0.8.2 and are
     Steam friends. Or ask for the lobby code ("Copy code" on the host's
     side) and use "Join this code".
 "uses a different CoFLink version":  both of you download the same version.

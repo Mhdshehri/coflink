@@ -426,6 +426,13 @@ static bool m_InviteUserToLobby(void *s, u64 l, u64 user)
     return true;
 }
 static bool m_SetLobbyJoinable(void *s, u64 l, bool j) { (void)s; (void)l; (void)j; return true; }
+static int m_AddFavoriteGame(void *s, uint32_t app, uint32_t ip, uint16_t cp, uint16_t qp, uint32_t fl, uint32_t t)
+{
+    (void)s;
+    printf("[mock] favorite added: app %u, %u.%u.%u.%u:%u (query %u), flags %u, time %s\n", app,
+           ip >> 24, (ip >> 16) & 255, (ip >> 8) & 255, ip & 255, cp, qp, fl, t > 1600000000u ? "now" : "WRONG");
+    return 0;
+}
 
 static int m_SendMessageToUser(void *s, const void *ident, const void *data, uint32_t n, int flags, int ch)
 {
@@ -489,7 +496,7 @@ const char *steam_load(void)
     S.MM_CreateLobby = m_CreateLobby; S.MM_JoinLobby = m_JoinLobby; S.MM_LeaveLobby = m_LeaveLobby;
     S.MM_SetLobbyData = m_SetLobbyData; S.MM_GetLobbyData = m_GetLobbyData; S.MM_GetLobbyOwner = m_GetLobbyOwner;
     S.MM_GetNumLobbyMembers = m_GetNumLobbyMembers; S.MM_GetLobbyMemberByIndex = m_GetLobbyMemberByIndex;
-    S.MM_InviteUserToLobby = m_InviteUserToLobby; S.MM_SetLobbyJoinable = m_SetLobbyJoinable;
+    S.MM_InviteUserToLobby = m_InviteUserToLobby; S.MM_SetLobbyJoinable = m_SetLobbyJoinable; S.MM_AddFavoriteGame = m_AddFavoriteGame;
     S.NM_SendMessageToUser = m_SendMessageToUser; S.NM_ReceiveMessagesOnChannel = m_ReceiveMessagesOnChannel;
     S.NM_AcceptSessionWithUser = m_AcceptSessionWithUser; S.NM_CloseSessionWithUser = m_CloseSessionWithUser;
     S.Ident_SetSteamID64 = m_SetSteamID64; S.Ident_GetSteamID64 = m_GetSteamID64;

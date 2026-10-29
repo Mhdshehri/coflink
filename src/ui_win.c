@@ -71,6 +71,21 @@ IMP void WINAPI LeaveCriticalSection(CRITICAL_SECTION *cs);
 IMP int WINAPI MultiByteToWideChar(UINT cp, DWORD flags, const char *s, int n, WCHAR *w, int wn);
 IMP int WINAPI WideCharToMultiByte(UINT cp, DWORD flags, const WCHAR *w, int wn, char *s, int n, const char *d, BOOL *u);
 IMP HINSTANCE WINAPI GetModuleHandleW(const WCHAR *name);
+IMP HBRUSH WINAPI CreateSolidBrush(DWORD color);
+IMP HANDLE WINAPI CreatePen(int style, int width, DWORD color);
+IMP HANDLE WINAPI SelectObject(HDC dc, HANDLE obj);
+IMP BOOL WINAPI DeleteObject(HANDLE obj);
+IMP HANDLE WINAPI GetStockObject(int i);
+IMP DWORD WINAPI SetTextColor(HDC dc, DWORD c);
+IMP DWORD WINAPI SetBkColor(HDC dc, DWORD c);
+IMP int WINAPI SetBkMode(HDC dc, int mode);
+IMP BOOL WINAPI RoundRect(HDC dc, int l, int t, int r, int b, int w, int h);
+IMP int WINAPI FillRect(HDC dc, const RECT *r, HBRUSH b);
+IMP int WINAPI DrawTextW(HDC dc, const WCHAR *t, int n, RECT *r, UINT fmt);
+IMP BOOL WINAPI GetClientRect(HWND w, RECT *r);
+IMP BOOL WINAPI RedrawWindow(HWND w, const RECT *r, HANDLE rgn, UINT flags);
+IMP void *WINAPI LoadLibraryExA(const char *path, void *file, DWORD flags);
+IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 
 #define WM_CREATE 0x1
 #define WM_DESTROY 0x2
@@ -88,7 +103,29 @@ IMP HINSTANCE WINAPI GetModuleHandleW(const WCHAR *name);
 #define LB_RESETCONTENT 0x184
 #define LB_SETCURSEL 0x186
 #define LB_GETCURSEL 0x188
+#define LB_GETTEXT 0x189
 #define LBN_DBLCLK 2
+#define WM_ERASEBKGND 0x14
+#define WM_DRAWITEM 0x2B
+#define WM_MEASUREITEM 0x2C
+#define WM_CTLCOLOREDIT 0x133
+#define WM_CTLCOLORLISTBOX 0x134
+#define WM_CTLCOLORSTATIC 0x138
+#define BS_OWNERDRAW 0xBL
+#define LBS_OWNERDRAWFIXED 0x10L
+#define LBS_HASSTRINGS 0x40L
+#define WS_BORDER 0x800000L
+#define ODT_LISTBOX 2
+#define ODS_SELECTED 0x1
+#define ODS_DISABLED 0x4
+#define ODS_FOCUS 0x10
+#define DT_CENTER 0x1
+#define DT_VCENTER 0x4
+#define DT_SINGLELINE 0x20
+#define DT_END_ELLIPSIS 0x8000
+#define TRANSPARENT_BK 1
+#define NULL_BRUSH 5
+#define RGBC(r, g, b) ((DWORD)((r) | ((g) << 8) | ((b) << 16)))
 #define WS_CHILD 0x40000000L
 #define WS_VISIBLE 0x10000000L
 #define WS_TABSTOP 0x10000L
@@ -115,8 +152,12 @@ IMP HINSTANCE WINAPI GetModuleHandleW(const WCHAR *name);
 
 enum {
     ID_HOST = 101, ID_JOIN, ID_STOP, ID_STATUS, ID_LOBBY, ID_COPYID, ID_JOINID,
-    ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_LOBBYLABEL,
+    ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME,
+    ID_LOBBYLABEL,
 };
+
+typedef struct { UINT type, id, item, action, state; HWND hwnd; HDC dc; RECT rc; uintptr_t data; } DrawItem;
+typedef struct { UINT type, id, item, width, height; uintptr_t data; } MeasureItem;
 
 /* ---------- shared with the engine thread ---------- */
 
@@ -215,6 +256,148 @@ static int g_list_shown = -1;
 
 static int S_(int v) { return v * g_dpi / 96; }
 
+/* ---------- dark / light theme ---------- */
+
+typedef struct {
+    bool dark;
+    DWORD bg, panel, text, dim, accent, accent_down, btn, btn_down, border, dis_bg, dis_text, status, sel_text;
+} Theme;
+
+static const Theme DARK = { true,
+    RGBC(18, 18, 20), RGBC(28, 29, 33), RGBC(232, 230, 227), RGBC(139, 142, 150),
+    RGBC(163, 22, 26), RGBC(120, 14, 18), RGBC(40, 42, 47), RGBC(30, 31, 35), RGBC(62, 65, 72),
+    RGBC(26, 27, 31), RGBC(85, 88, 96), RGBC(235, 87, 87), RGBC(255, 255, 255) };
+static const Theme LIGHT = { false,
+    RGBC(243, 243, 243), RGBC(255, 255, 255), RGBC(27, 27, 27), RGBC(107, 107, 107),
+    RGBC(179, 38, 30), RGBC(140, 25, 20), RGBC(226, 226, 226), RGBC(206, 206, 206), RGBC(190, 190, 190),
+    RGBC(236, 236, 236), RGBC(160, 160, 160), RGBC(179, 38, 30), RGBC(255, 255, 255) };
+
+static Theme T;
+static HBRUSH g_br_bg, g_br_panel, g_br_accent;
+
+static void *sys_proc(const char *dll, const char *fn)
+{
+    void *m = LoadLibraryExA(dll, 0, 0x800 /* only from System32 */);
+    return m ? GetProcAddress(m, fn) : 0;
+}
+
+/* Title bar and scrollbars follow the theme on Windows 10 (1809+) and 11;
+   older Windows just keeps its normal title bar. */
+static void apply_system_parts(void)
+{
+    typedef long(WINAPI * DwmSet)(HWND, DWORD, const void *, DWORD);
+    typedef long(WINAPI * SetTheme)(HWND, const WCHAR *, const WCHAR *);
+    static DwmSet dwm;
+    static SetTheme theme;
+    static bool looked;
+    if (!looked) {
+        looked = true;
+        dwm = (DwmSet)sys_proc("dwmapi.dll", "DwmSetWindowAttribute");
+        theme = (SetTheme)sys_proc("uxtheme.dll", "SetWindowTheme");
+    }
+    if (dwm) {
+        BOOL on = T.dark;
+        if (dwm(g_wnd, 20, &on, sizeof on) != 0) dwm(g_wnd, 19, &on, sizeof on); /* dark title bar */
+    }
+    if (theme) {
+        const WCHAR *name = T.dark ? WTEXT("DarkMode_Explorer") : WTEXT("Explorer");
+        theme(g_c[ID_LOG], name, 0);
+        theme(g_c[ID_LIST], name, 0);
+    }
+}
+
+static void save_theme(void) { file_write_text("coflink_theme.txt", T.dark ? "dark\n" : "light\n"); }
+
+static bool saved_light(void)
+{
+    FILE *f = fopen("coflink_theme.txt", "rb");
+    if (!f) return false; /* first start: dark */
+    char b[16] = { 0 };
+    fread(b, 1, sizeof b - 1, f);
+    fclose(f);
+    return b[0] == 'l';
+}
+
+static void set_theme(bool dark)
+{
+    T = dark ? DARK : LIGHT;
+    if (g_br_bg) { DeleteObject(g_br_bg); DeleteObject(g_br_panel); DeleteObject(g_br_accent); }
+    g_br_bg = CreateSolidBrush(T.bg);
+    g_br_panel = CreateSolidBrush(T.panel);
+    g_br_accent = CreateSolidBrush(T.accent);
+    if (g_wnd) {
+        SetWindowTextW(g_c[ID_THEME], T.dark ? WTEXT("Light mode") : WTEXT("Dark mode"));
+        apply_system_parts();
+        RedrawWindow(g_wnd, 0, 0, 0x1 | 0x4 | 0x80 | 0x400); /* invalidate, erase, children, frame */
+    }
+}
+
+static bool is_primary(UINT id) { return id == ID_HOST || id == ID_JOIN || id == ID_ACTION; }
+
+static void draw_button(DrawItem *d)
+{
+    bool down = d->state & ODS_SELECTED, off = d->state & ODS_DISABLED, focus = d->state & ODS_FOCUS;
+    DWORD fill, text, edge;
+    if (off) { fill = T.dis_bg; text = T.dis_text; edge = T.dis_bg; }
+    else if (is_primary(d->id)) { fill = down ? T.accent_down : T.accent; text = T.sel_text; edge = fill; }
+    else { fill = down ? T.btn_down : T.btn; text = T.text; edge = T.border; }
+    FillRect(d->dc, &d->rc, g_br_bg);
+    HBRUSH b = CreateSolidBrush(fill);
+    HANDLE p = CreatePen(0, 1, edge);
+    HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
+    int r = S_(10);
+    RoundRect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, r, r);
+    if (focus && !off) { /* keyboard focus ring */
+        HANDLE fp = CreatePen(0, 1, is_primary(d->id) ? T.sel_text : T.dim);
+        SelectObject(d->dc, fp);
+        SelectObject(d->dc, GetStockObject(NULL_BRUSH));
+        int k = S_(3);
+        RoundRect(d->dc, d->rc.left + k, d->rc.top + k, d->rc.right - k, d->rc.bottom - k, r, r);
+        SelectObject(d->dc, p);
+        DeleteObject(fp);
+    }
+    SelectObject(d->dc, ob);
+    SelectObject(d->dc, op);
+    DeleteObject(b);
+    DeleteObject(p);
+    WCHAR w[64];
+    int n = GetWindowTextW(d->hwnd, w, 64);
+    HANDLE of = SelectObject(d->dc, is_primary(d->id) ? g_bold : g_font);
+    SetBkMode(d->dc, TRANSPARENT_BK);
+    SetTextColor(d->dc, text);
+    RECT tr = d->rc;
+    if (down) { tr.top += 1; tr.bottom += 1; }
+    DrawTextW(d->dc, w, n, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    SelectObject(d->dc, of);
+}
+
+static void draw_list_item(DrawItem *d)
+{
+    bool sel = d->state & ODS_SELECTED;
+    FillRect(d->dc, &d->rc, sel ? g_br_accent : g_br_panel);
+    if (d->item == (UINT)-1) return;
+    WCHAR w[UI_NAME + 8];
+    int n = (int)SendMessageW(d->hwnd, LB_GETTEXT, d->item, (LPARAM)w);
+    if (n <= 0) return;
+    HANDLE of = SelectObject(d->dc, g_font);
+    SetBkMode(d->dc, TRANSPARENT_BK);
+    SetTextColor(d->dc, sel ? T.sel_text : T.text);
+    RECT tr = d->rc;
+    tr.left += S_(8);
+    DrawTextW(d->dc, w, n, &tr, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    SelectObject(d->dc, of);
+}
+
+/* colors for labels and text boxes; returns the background brush */
+static LRESULT control_colors(UINT msg, HDC dc, HWND ctl_)
+{
+    if (ctl_ == g_c[ID_ACCENT]) return (LRESULT)g_br_accent;
+    bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY];
+    SetTextColor(dc, (ctl_ == g_c[ID_LISTLABEL] || ctl_ == g_c[ID_LOBBYLABEL]) ? T.dim : T.text);
+    SetBkColor(dc, box ? T.panel : T.bg);
+    return (LRESULT)(box ? g_br_panel : g_br_bg);
+}
+
 static WCHAR *wide(const char *s, WCHAR *buf, int n)
 {
     int r = MultiByteToWideChar(CP_UTF8, 0, s, -1, buf, n);
@@ -249,25 +432,28 @@ static HWND ctl(int id, const WCHAR *cls, const WCHAR *text, DWORD style, DWORD 
 
 static void build(void)
 {
-    const WCHAR *B = WTEXT("BUTTON"), *T = WTEXT("STATIC"), *E = WTEXT("EDIT"), *L = WTEXT("LISTBOX");
-    ctl(ID_TITLE, T, WTEXT("Cry of Fear co-op over Steam: no VPN, no port forwarding"), 0, 0, 14, 12, 572, 20, g_bold);
-    ctl(ID_HOST, B, WTEXT("Host a game"), WS_TABSTOP, 0, 14, 40, 180, 38, g_bold);
-    ctl(ID_JOIN, B, WTEXT("Join a friend"), WS_TABSTOP, 0, 204, 40, 180, 38, g_bold);
-    ctl(ID_STOP, B, WTEXT("Stop"), WS_TABSTOP, 0, 486, 40, 100, 38, g_font);
-    ctl(ID_STATUS, T, WTEXT(""), 0, 0, 14, 90, 572, 26, g_big);
-    ctl(ID_LOBBYLABEL, T, WTEXT("Lobby code:"), 0, 0, 14, 130, 70, 22, g_font);
-    ctl(ID_LOBBY, E, WTEXT(""), WS_TABSTOP | ES_AUTOHSCROLL, WS_EX_CLIENTEDGE, 84, 127, 250, 24, g_font);
-    ctl(ID_COPYID, B, WTEXT("Copy code"), WS_TABSTOP, 0, 342, 126, 100, 26, g_font);
-    ctl(ID_JOINID, B, WTEXT("Join this code"), WS_TABSTOP, 0, 450, 126, 136, 26, g_font);
-    ctl(ID_LISTLABEL, T, WTEXT(""), 0, 0, 14, 166, 572, 20, g_font);
-    ctl(ID_LIST, L, WTEXT(""), WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT, WS_EX_CLIENTEDGE,
-        14, 188, 430, 112, g_font);
-    ctl(ID_ACTION, B, WTEXT("Join"), WS_TABSTOP, 0, 452, 188, 134, 34, g_bold);
-    ctl(ID_REFRESH, B, WTEXT("Refresh"), WS_TABSTOP, 0, 452, 228, 134, 30, g_font);
-    ctl(ID_LAUNCH, B, WTEXT("Start Cry of Fear"), WS_TABSTOP, 0, 14, 310, 180, 30, g_font);
-    ctl(ID_COPYCONN, B, WTEXT("Copy connect command"), WS_TABSTOP, 0, 204, 310, 200, 30, g_font);
-    ctl(ID_LOG, E, WTEXT(""), WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, WS_EX_CLIENTEDGE,
-        14, 350, 572, 214, g_font);
+    const WCHAR *B = WTEXT("BUTTON"), *T_ = WTEXT("STATIC"), *E = WTEXT("EDIT"), *L = WTEXT("LISTBOX");
+    const DWORD OD = WS_TABSTOP | BS_OWNERDRAW;
+    ctl(ID_TITLE, T_, WTEXT("Cry of Fear co-op over Steam: no VPN, no port forwarding"), 0, 0, 14, 12, 460, 20, g_bold);
+    ctl(ID_THEME, B, WTEXT(""), OD, 0, 486, 9, 100, 24, g_font);
+    ctl(ID_ACCENT, T_, WTEXT(""), 0, 0, 14, 36, 572, 2, g_font);
+    ctl(ID_HOST, B, WTEXT("Host a game"), OD, 0, 14, 48, 180, 38, g_bold);
+    ctl(ID_JOIN, B, WTEXT("Join a friend"), OD, 0, 204, 48, 180, 38, g_bold);
+    ctl(ID_STOP, B, WTEXT("Stop"), OD, 0, 486, 48, 100, 38, g_font);
+    ctl(ID_STATUS, T_, WTEXT(""), 0, 0, 14, 96, 572, 26, g_big);
+    ctl(ID_LOBBYLABEL, T_, WTEXT("Lobby code:"), 0, 0, 14, 134, 74, 22, g_font);
+    ctl(ID_LOBBY, E, WTEXT(""), WS_TABSTOP | ES_AUTOHSCROLL | WS_BORDER, 0, 88, 131, 246, 24, g_font);
+    ctl(ID_COPYID, B, WTEXT("Copy code"), OD, 0, 342, 130, 100, 26, g_font);
+    ctl(ID_JOINID, B, WTEXT("Join this code"), OD, 0, 450, 130, 136, 26, g_font);
+    ctl(ID_LISTLABEL, T_, WTEXT(""), 0, 0, 14, 168, 572, 20, g_font);
+    ctl(ID_LIST, L, WTEXT(""), WS_TABSTOP | WS_VSCROLL | WS_BORDER | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT |
+        LBS_OWNERDRAWFIXED | LBS_HASSTRINGS, 0, 14, 190, 430, 112, g_font);
+    ctl(ID_ACTION, B, WTEXT("Join"), OD, 0, 452, 190, 134, 34, g_bold);
+    ctl(ID_REFRESH, B, WTEXT("Refresh"), OD, 0, 452, 230, 134, 30, g_font);
+    ctl(ID_LAUNCH, B, WTEXT("Start Cry of Fear"), OD, 0, 14, 312, 180, 30, g_font);
+    ctl(ID_COPYCONN, B, WTEXT("Copy connect command"), OD, 0, 204, 312, 200, 30, g_font);
+    ctl(ID_LOG, E, WTEXT(""), WS_VSCROLL | WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 0,
+        14, 352, 572, 212, g_font);
     SendMessageW(g_c[ID_LOG], EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
 }
 
@@ -415,6 +601,10 @@ static void on_command(int id, int code)
         break;
     case ID_LAUNCH: push_cmd(CMD_LAUNCH, 0); break;
     case ID_REFRESH: push_cmd(CMD_REFRESH, 0); break;
+    case ID_THEME:
+        set_theme(!T.dark);
+        save_theme();
+        break;
     case ID_COPYCONN: {
         char cmd[48];
         sfmt(cmd, sizeof cmd, "connect 127.0.0.1:%u", (unsigned)g_shown.local_port);
@@ -429,6 +619,27 @@ static void on_command(int id, int code)
 static LRESULT WINAPI wndproc(HWND w, UINT m, WPARAM wp, LPARAM lp)
 {
     switch (m) {
+    case WM_ERASEBKGND: {
+        RECT r;
+        GetClientRect(w, &r);
+        FillRect((HDC)wp, &r, g_br_bg);
+        return 1;
+    }
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+        return control_colors(m, (HDC)wp, (HWND)lp);
+    case WM_MEASUREITEM: {
+        MeasureItem *mi = (MeasureItem *)lp;
+        if (mi->type == ODT_LISTBOX) mi->height = (UINT)S_(24);
+        return 1;
+    }
+    case WM_DRAWITEM: {
+        DrawItem *d = (DrawItem *)lp;
+        if (d->type == ODT_LISTBOX) draw_list_item(d);
+        else draw_button(d);
+        return 1;
+    }
     case WM_COMMAND:
         on_command((int)(wp & 0xFFFF), (int)((wp >> 16) & 0xFFFF));
         return 0;
@@ -486,7 +697,8 @@ int main(int argc, char **argv)
     wc.icon = LoadIconW(inst, (const WCHAR *)(uintptr_t)1);
     wc.iconSm = wc.icon;
     wc.cursor = LoadCursorW(0, (const WCHAR *)(uintptr_t)32512);
-    wc.background = (HBRUSH)(uintptr_t)(COLOR_BTNFACE + 1);
+    set_theme(!saved_light()); /* dark unless the player picked light before */
+    wc.background = 0;         /* painted in WM_ERASEBKGND with the theme color */
     wc.className = WTEXT("CoFLinkWindow");
     RegisterClassExW(&wc);
 
@@ -499,6 +711,7 @@ int main(int argc, char **argv)
                             y < 0 ? 0 : y, ww, wh, 0, 0, inst, 0);
     if (!g_wnd) return 1;
     build();
+    set_theme(T.dark); /* button label, title bar, scrollbars */
     ui_log("HOST: click \"Host a game\", then \"Start Cry of Fear\" and create a LAN co-op game.");
     ui_log("FRIEND: click \"Join a friend\" and pick the host (or paste their lobby code).");
     ui_log("        Once linked: start Cry of Fear, press ~ and paste  connect 127.0.0.1:27115");

@@ -205,6 +205,9 @@ bool process_running(const char *exe_name)
     return found;
 }
 
+long time(long *t); /* msvcrt.dll: 32-bit time on x86 */
+uint32_t unix_time(void) { return (uint32_t)time(0); }
+
 bool file_exists(const char *path)
 {
     DWORD a = GetFileAttributesA(path);

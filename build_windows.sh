@@ -25,15 +25,16 @@ mkdef user32 OpenClipboard@4 EmptyClipboard@0 SetClipboardData@8 CloseClipboard@
     DispatchMessageW@4 IsDialogMessageW@8 PostQuitMessage@4 SendMessageW@16 SetWindowTextW@8 \
     GetWindowTextW@12 SetTimer@16 MessageBoxW@16 LoadCursorW@8 LoadIconW@8 ShowWindow@8 \
     UpdateWindow@4 EnableWindow@8 DestroyWindow@4 GetDC@4 ReleaseDC@8 AdjustWindowRectEx@16 \
-    GetSystemMetrics@4
-mkdef gdi32 CreateFontW@56 GetDeviceCaps@8
+    GetSystemMetrics@4 FillRect@12 DrawTextW@20 GetClientRect@8 RedrawWindow@16
+mkdef gdi32 CreateFontW@56 GetDeviceCaps@8 CreateSolidBrush@4 CreatePen@12 SelectObject@8 DeleteObject@4 \
+    GetStockObject@4 SetTextColor@8 SetBkColor@8 SetBkMode@8 RoundRect@28
 mkdef comctl32 InitCommonControls@0
 mkdef shell32 ShellExecuteA@24
 mkdef ws2_32 WSAStartup@8 socket@12 bind@12 connect@12 send@16 recv@16 sendto@24 recvfrom@24 \
     select@20 closesocket@4 ioctlsocket@12 getsockname@12 WSAGetLastError@0 WSAIoctl@36
 mkdef msvcrt printf _vsnprintf strlen strcmp strncmp strchr strstr memcpy memset memcmp atoi \
     malloc calloc free fopen fread fwrite fclose fgets fflush exit __iob_func \
-    _ui64toa _strtoui64 __getmainargs
+    _ui64toa _strtoui64 __getmainargs time
 
 # icon, manifest (modern look, sharp text on high-DPI screens) and version info
 llvm-rc -no-preprocess -C 65001 -FO "$OUT/coflink.res" res/coflink.rc

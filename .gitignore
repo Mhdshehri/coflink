@@ -5,3 +5,4 @@ dist/
 *.dll
 steam_appid.txt
 __pycache__/
+coflink_theme.txt

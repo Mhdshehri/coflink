@@ -14,7 +14,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.8.1"
+#define VERSION "0.8.2"
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
 #define SPACEWAR_APPID 480
@@ -336,6 +336,22 @@ static bool open_game_socket(void)
     return false;
 }
 
+/* Put this PC's CoFLink address in Cry of Fear's Favorites (Steam keeps the
+   list), so the friend can also join from the game's Servers -> Favorites tab.
+   It's always 127.0.0.1 (this PC), whoever the host is. */
+static void add_favorite(void)
+{
+    static uint16_t added[4];
+    for (int i = 0; i < 4; i++) if (added[i] == g_local_port) return;
+    if (!S.MM_AddFavoriteGame) return;
+    int r = S.MM_AddFavoriteGame(MM, COF_APPID, 0x7F000001u /* 127.0.0.1 */, g_local_port, g_local_port,
+                                 1 /* favorite */, unix_time());
+    for (int i = 0; i < 4; i++) if (!added[i]) { added[i] = g_local_port; break; }
+    if (r >= 0)
+        say("Added 127.0.0.1:%u to Cry of Fear's Favorites (in the game: Find servers -> Favorites).",
+            (unsigned)g_local_port);
+}
+
 static void joined_message(void)
 {
     char cmd[64];
@@ -344,8 +360,8 @@ static void joined_message(void)
     say("");
     say("=== Linked to %s. Now join from the game: ===", who(g_host));
     say("1. Click \"Start Cry of Fear\" (or start it from Steam).");
-    say("2. In the main menu press ~ to open the console.");
-    say("3. Paste with Ctrl+V and press Enter (already copied):   %s", cmd);
+    say("2. Find servers -> Favorites tab -> pick 127.0.0.1:%u -> Connect.", (unsigned)g_local_port);
+    say("   Or in the main menu press ~, then Ctrl+V and Enter (already copied):   %s", cmd);
     say("");
 }
 
@@ -383,7 +399,7 @@ static void on_lobby_entered(u64 lobby, uint32_t response)
     S.Friends_SetRichPresence(F, "status", "Playing Cry of Fear co-op (CoFLink)");
     send_ctl(g_host, 'H');
     g_last_hello = now_ms();
-    if (open_game_socket()) joined_message();
+    if (open_game_socket()) { add_favorite(); joined_message(); }
 }
 
 /* ---------- host: lobby + invites ---------- */

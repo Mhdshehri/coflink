@@ -28,6 +28,7 @@ void clipboard_set(const char *text);
 bool process_running(const char *exe_name); /* e.g. "cof.exe", case-insensitive */
 void open_url(const char *url);
 bool file_exists(const char *path);
+uint32_t unix_time(void);
 bool run_program(const char *exe, const char *args, const char *dir); /* start it, don't wait */
 bool steam_install_path(char *out, int n); /* Steam's own folder (from the registry) */
 #ifdef _WIN32
