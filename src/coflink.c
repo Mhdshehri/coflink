@@ -15,7 +15,7 @@
 #include "ui.h"
 
 #ifndef VERSION /* the tests build a second copy with a different version */
-#define VERSION "0.9.2"
+#define VERSION "0.9.3"
 #endif
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
@@ -140,7 +140,6 @@ static void send_ctl(u64 to, char c)
 }
 
 static void on_probe_reply(const uint8_t *b, int len);
-static void note_query(const char *who_, const uint8_t *b, int n, uint16_t from_port, const char *what);
 
 static void send_ctl_data(u64 to, const void *p, int n)
 {
@@ -326,17 +325,8 @@ static u64 g_slot_used[NSLOT];
 static bool g_welcomed, g_host_warned, g_said_down, g_warned_no_answer;
 static u64 g_host_last, g_last_hello, g_last_ka, g_up, g_down, g_first_up_ms;
 /* CoFLink checks the host's co-op server answers, to tell the friend when to connect */
-static bool g_server_ready, g_said_wait_server, g_said_ready, g_said_answered;
+static bool g_server_ready, g_said_wait_server, g_said_ready;
 static u64 g_last_probe, g_welcomed_ms;
-/* The host server's real info, refreshed by that check, in the standard reply
-   format with Cry of Fear's app id. Cry of Fear's server list asks through
-   Steam in a newer format that Cry of Fear's old server ignores, so CoFLink
-   answers that one question itself (game data is never changed). */
-static uint8_t g_info[2048];
-static int g_info_len;
-int a2s_fix_appid(const uint8_t *in, int n, uint8_t *out, int cap, uint32_t appid);
-int a2s_appids(const uint8_t *in, int n, int *shortid, long long *gameapp);
-static long long g_server_app = -1; /* the app id the host's own server announces (for Favorites) */
 static u64 g_rejected[16];
 static int g_nrejected;
 /* Direct discovery: "are you hosting?" ('Q') to friends running CoFLink;
@@ -362,9 +352,8 @@ static Answer *answer_for(u64 friend_, bool make)
 
 static void reset_connect_state(void)
 {
-    g_server_ready = g_said_wait_server = g_said_ready = g_said_answered = false;
+    g_server_ready = g_said_wait_server = g_said_ready = false;
     g_last_probe = g_welcomed_ms = 0;
-    g_info_len = 0;
 }
 
 static void reset_join_state(void)
@@ -410,32 +399,6 @@ static bool open_game_socket(void)
     return false;
 }
 
-/* "Add to Favorites" button: put this PC's CoFLink address in Cry of Fear's
-   Favorites (Steam keeps the list; an address already there isn't added
-   twice). It's always 127.0.0.1 (this PC), whoever the host is. Only when the
-   player clicks the button. */
-static void add_favorite(void)
-{
-    if (g_mode != MODE_JOIN || !g_lobby) { say("! Link to a host first, then add to Favorites."); return; }
-    if (!S.MM_AddFavoriteGame) return;
-    /* Test: Steam keeps Favorites per game. Cry of Fear's own server list may
-       look under Half-Life (70) or under whatever app id its server announces,
-       so the address goes under each of those too. */
-    int r = S.MM_AddFavoriteGame(MM, COF_APPID, 0x7F000001u /* 127.0.0.1 */, g_local_port, g_local_port,
-                                 1 /* favorite */, unix_time());
-    uint32_t extra[2] = { 70, g_server_app > 0 ? (uint32_t)g_server_app : 0 };
-    for (int k = 0; k < 2; k++) {
-        if (!extra[k] || extra[k] == COF_APPID || (k == 1 && extra[1] == extra[0])) continue;
-        int r2 = S.MM_AddFavoriteGame(MM, extra[k], 0x7F000001u, g_local_port, g_local_port, 1, unix_time());
-        say("(check) also added under app %u (Steam said %d)", (unsigned)extra[k], r2);
-    }
-    if (r >= 0)
-        say("Added 127.0.0.1:%u to Cry of Fear's Favorites (in the game: Find servers -> Favorites). (check: Steam said %d)",
-            (unsigned)g_local_port, r);
-    else
-        say("! Steam would not add it to Favorites. Use the console: connect 127.0.0.1:%u", (unsigned)g_local_port);
-}
-
 static void joined_message(void)
 {
     char cmd[64];
@@ -445,7 +408,6 @@ static void joined_message(void)
     say("=== Linked to %s. Now join from the game: ===", who(g_host));
     say("1. Click \"Start Cry of Fear\" (or start it from Steam).");
     say("2. In the main menu press ~, then Ctrl+V and Enter (already copied):   %s", cmd);
-    say("   Or click \"Add to Favorites\" once, then join from Find servers -> Favorites.");
     say("");
 }
 
@@ -737,7 +699,6 @@ static void drain_steam(void)
                 if (slot == SLOT_PROBE) {
                     on_probe_reply(body, len);
                 } else if (g_slot_port[slot]) {
-                    note_query("host's server replied", body, len, g_slot_port[slot], "passed back");
                     udp_sendto(g_game_sock, body, len, g_game_ip, g_slot_port[slot]);
                     g_server_ready = true;
                     if (!g_down++ && !g_said_down) {
@@ -879,53 +840,6 @@ static void on_probe_reply(const uint8_t *b, int len)
         say("%s's Cry of Fear co-op game is up.", who(g_host));
         ui_alert("host's game is up");
     }
-    int fixed = a2s_fix_appid(b, len, g_info, (int)sizeof g_info, COF_APPID);
-    if (fixed > 0) {
-        g_info_len = fixed;
-    } else if (len >= 6 && len <= (int)sizeof g_info && b[4] == 'I') {
-        memcpy(g_info, b, (size_t)len); /* already a standard reply with the right id */
-        g_info_len = len;
-    }
-    static bool told;
-    if (!told) {
-        told = true;
-        int sid;
-        long long gapp;
-        if (a2s_appids(b, len, &sid, &gapp)) {
-            say("(check) host's server says it is app %d (short id) / %lld (game id)", sid, gapp);
-            g_server_app = gapp > 0 ? gapp : sid > 0 ? sid : -1;
-        }
-        say("(check) host's server info: '%c' reply, %d bytes -> server-list reply %s (%d bytes)",
-            len > 4 && b[4] >= 32 && b[4] < 127 && b[4] != '%' ? b[4] : '?', len, g_info_len ? "ready" : "NOT made", g_info_len);
-    }
-}
-
-static bool is_info_query(const uint8_t *b, int n)
-{
-    return n >= 25 && b[0] == 0xFF && b[1] == 0xFF && b[2] == 0xFF && b[3] == 0xFF && b[4] == 'T';
-}
-
-/* Server-list check: say (once per kind) what Cry of Fear / Steam asked
-   CoFLink's port and what happened, so a server-list problem can be pinned down. */
-static void note_query(const char *who_, const uint8_t *b, int n, uint16_t from_port, const char *what)
-{
-    static char seen[24][28];
-    static int nseen;
-    if (n < 5 || b[0] != 0xFF || b[1] != 0xFF || b[2] != 0xFF || b[3] != 0xFF) return;
-    char text[24];
-    int k = 0;
-    for (int i = 4; i < n && k < 20; i++) {
-        uint8_t c = b[i];
-        if (!c) break;
-        text[k++] = (c >= 32 && c < 127 && c != '%') ? (char)c : '.';
-    }
-    text[k] = 0;
-    char key[28];
-    sfmt(key, sizeof key, "%c%.20s", who_[0], text);
-    for (int i = 0; i < nseen; i++)
-        if (!strcmp(seen[i], key)) return;
-    if (nseen < 24) sfmt(seen[nseen++], sizeof seen[0], "%s", key);
-    say("(check) %s '%s' (%d bytes, from port %u) -> %s", who_, text, n, (unsigned)from_port, what);
 }
 
 /* Join side: say when the host's co-op game is up, so the friend knows to
@@ -959,20 +873,8 @@ static void join_tick(void)
         int r = udp_recvfrom(g_game_sock, g_buf, BUF_SIZE, &ip, &port);
         if (r < 0) break;
         if (r == 0 || r > MAX_GAME_PKT) continue;
-        if (!g_lobby) { note_query("asked", g_buf, r, port, "not answered: not linked to a host right now"); continue; }
+        if (!g_lobby) continue;
         g_game_ip = ip;
-        if (is_info_query(g_buf, r) && !g_info_len)
-            note_query("asked", g_buf, r, port, "passed to the host (no server info here yet)");
-        if (is_info_query(g_buf, r) && g_info_len) { /* the server list asking about the host's game */
-            udp_sendto(g_game_sock, g_info, g_info_len, ip, port);
-            note_query("asked", g_buf, r, port, "answered by CoFLink with the host's game info");
-            if (!g_said_answered) {
-                g_said_answered = true;
-                say("(Showing %s's game in Cry of Fear's server list.)", who(g_host));
-            }
-            continue;
-        }
-        if (!is_info_query(g_buf, r)) note_query("asked", g_buf, r, port, "passed to the host's server");
         bool first = !g_up;
         int slot = slot_for(port, t);
         if (first) say("Cry of Fear is talking to CoFLink. Passing it to %s...", who(g_host));
@@ -981,9 +883,8 @@ static void join_tick(void)
     }
     if (!g_lobby) return;
     if (!g_welcomed && t - g_last_hello > 2000) { send_hello(); g_last_hello = t; }
-    /* check the host's co-op server answers: every 2 s until it does, then
-       every 5 s to keep its info (map, players) fresh for the server list */
-    if (g_welcomed && t - g_last_probe > (g_server_ready ? 5000u : 2000u)) {
+    /* check the host's co-op server answers (every 2 s until it does) */
+    if (g_welcomed && !g_server_ready && t - g_last_probe > 2000) {
         probe_server(0);
         g_last_probe = t;
     }
@@ -1208,7 +1109,6 @@ static void handle_cmd(const Cmd *c)
         if (g_mode != MODE_JOIN) start_mode(MODE_JOIN);
         if (g_mode == MODE_JOIN) { g_joining = 0; request_join(c->arg); }
         break;
-    case CMD_FAVORITE: add_favorite(); break;
     case CMD_KICK: kick_peer(c->arg); break;
     case CMD_LAUNCH: /* "Start Cry of Fear" */
         start_game();

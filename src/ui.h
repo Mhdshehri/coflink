@@ -12,7 +12,6 @@ typedef enum {
     CMD_JOIN_LOBBY,  /* arg = lobby id */
     CMD_LAUNCH,      /* start Cry of Fear (through Steam, as usual) */
     CMD_REFRESH,     /* look for a hosting friend right now */
-    CMD_FAVORITE,    /* add 127.0.0.1:<port> to Cry of Fear's Favorites */
     CMD_KICK,        /* host: arg = friend's Steam id */
     CMD_STATUS,      /* print a status line */
     CMD_STOP,        /* stop hosting/joining, back to the start screen */

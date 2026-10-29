@@ -159,7 +159,7 @@ IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 
 enum {
     ID_HOST = 101, ID_JOIN, ID_STOP, ID_STATUS, ID_LOBBY, ID_COPYID, ID_JOINID,
-    ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME, ID_FAVORITE,
+    ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME,
     ID_LOBBYLABEL,
 };
 
@@ -497,8 +497,7 @@ static void build(void)
     ctl(ID_ACTION, B, WTEXT("Join"), OD, 0, 452, 190, 134, 34, g_bold);
     ctl(ID_REFRESH, B, WTEXT("Refresh"), OD, 0, 452, 230, 134, 30, g_font);
     ctl(ID_LAUNCH, B, WTEXT("Start Cry of Fear"), OD, 0, 14, 312, 180, 30, g_font);
-    ctl(ID_COPYCONN, B, WTEXT("Copy connect command"), OD, 0, 200, 312, 190, 30, g_font);
-    ctl(ID_FAVORITE, B, WTEXT("Add to Favorites"), OD, 0, 396, 312, 190, 30, g_font);
+    ctl(ID_COPYCONN, B, WTEXT("Copy connect command"), OD, 0, 204, 312, 200, 30, g_font);
     framed(ID_LOG, E, WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 14, 352, 572, 212, 7, 5);
     SendMessageW(g_c[ID_LOG], EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
 }
@@ -555,8 +554,6 @@ static void refresh_controls(void)
     EnableWindow(g_c[ID_REFRESH], !g_closing && (idle || (join && !s->lobby)));
     EnableWindow(g_c[ID_LAUNCH], !g_closing);
     EnableWindow(g_c[ID_COPYCONN], join && s->lobby);
-    ShowWindow(g_c[ID_FAVORITE], join && s->lobby ? 5 : 0); /* appears once linked */
-    EnableWindow(g_c[ID_FAVORITE], join && s->lobby && !g_closing);
 }
 
 static void on_timer(void)
@@ -675,7 +672,6 @@ static void on_command(int id, int code)
         break;
     case ID_LAUNCH: push_cmd(CMD_LAUNCH, 0); break;
     case ID_REFRESH: push_cmd(CMD_REFRESH, 0); break;
-    case ID_FAVORITE: push_cmd(CMD_FAVORITE, 0); break;
     case ID_THEME:
         set_theme(!T.dark);
         save_theme();

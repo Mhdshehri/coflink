@@ -31,28 +31,6 @@ INFO_M = (b"\xff\xff\xff\xffm" + b"127.0.0.1:27015\0" + b"KaZ game\0" + b"cof_in
           + b"Cry of Fear\0" + bytes([1, 4, 47, ord("L"), ord("W"), 0, 0, 0, 0]))
 
 
-def parse_info_I(d):
-    """Parse a Source 'I' reply; returns dict or None."""
-    if not d.startswith(b"\xff\xff\xff\xffI"):
-        return None
-    i = 6
-    out = {}
-    for k in ("name", "map", "folder", "game"):
-        j = d.index(b"\0", i); out[k] = d[i:j].decode(); i = j + 1
-    out["shortid"] = int.from_bytes(d[i:i + 2], "little"); i += 2
-    out["players"], out["max"], out["bots"] = d[i], d[i + 1], d[i + 2]; i += 3
-    out["type"], out["env"], out["vis"], out["vac"] = chr(d[i]), chr(d[i + 1]), d[i + 2], d[i + 3]; i += 4
-    j = d.index(b"\0", i); out["version"] = d[i:j].decode(); i = j + 1
-    edf = d[i]; i += 1
-    if edf & 0x80: i += 2
-    if edf & 0x10: i += 8
-    if edf & 0x40: i += 2; i = d.index(b"\0", i) + 1
-    if edf & 0x20: i = d.index(b"\0", i) + 1
-    out["gameid"] = int.from_bytes(d[i:i + 8], "little") if edf & 0x01 else None
-    out["rest"] = len(d) - (i + 8 if edf & 0x01 else i)
-    return out
-
-
 class FakeServer(threading.Thread):
     def __init__(self, port=27015):
         super().__init__(daemon=True)
@@ -494,30 +472,6 @@ def main():
         check("Found user1091" not in jx.log, "someone who isn't the host's friend gets no answer")
         jx.stop(); hq.stop()
 
-        print("[17] Cry of Fear's server list sees the host's game (info answered by CoFLink)")
-        hf = Proc("HF", dict(base, MOCK_ID="1101", MOCK_FRIENDS="1102"), ["host"])
-        jf = Proc("JF", dict(base, MOCK_ID="1102", MOCK_FRIENDS="1101"), ["join", "--no-launch", "--yes"])
-        procs += [hf, jf]
-        pf = local_port(jf)
-        jf.wait_for(r"Connected to user1101")
-        check(jf.wait_for(r"user1101's Cry of Fear co-op game is up") is not None, "joiner checked the host's server")
-        time.sleep(0.5)
-        for label, q in (("Steam's newer query (with challenge)", b"\xff\xff\xff\xffTSource Engine Query\0\xff\xff\xff\xff"),
-                         ("the old query", b"\xff\xff\xff\xffTSource Engine Query\0")):
-            qs = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); qs.bind(("127.0.0.1", 0)); qs.settimeout(2)
-            qs.sendto(q, ("127.0.0.1", pf))
-            try: rep = qs.recvfrom(4096)[0]
-            except socket.timeout: rep = b""
-            info = parse_info_I(rep)
-            check(info is not None and info["gameid"] == 223710, f"{label}: answered as Cry of Fear (app 223710)")
-            check(info is not None and info["name"] == "KaZ game" and info["map"] == "cof_intro"
-                  and info["players"] == 1 and info["max"] == 4 and info["rest"] == 0,
-                  f"{label}: the host server's real name, map and players")
-        check(jf.wait_for(r"Showing user1101's game in Cry of Fear's server list") is not None, "the log says so once")
-        n, exact, ordered = stream_test(pf, 300)
-        check(n == 300 and exact and ordered, "game packets still pass unchanged")
-        hf.stop(); jf.stop()
-
         print("[20] a server that asks for a challenge first is still seen as up")
         srv.challenge = True
         hc = Proc("HC", dict(base, MOCK_ID="1131", MOCK_FRIENDS="1132"), ["host"])
@@ -639,34 +593,6 @@ def main():
         time.sleep(7)
         check("Found user1151" not in jn2.log, "not on the host's friends list: host stays hidden")
         jn2.stop(); hg.stop()
-
-        print("[23] Add to Favorites: only when the player asks")
-        hfv = Proc("HFV", dict(base, MOCK_ID="1161", MOCK_FRIENDS="1162"), ["host"])
-        procs.append(hfv)
-        hfv.wait_for(r"Lobby is ready")
-        e = dict(os.environ, **base, MOCK_ID="1162", MOCK_FRIENDS="1161", ASAN_OPTIONS="detect_leaks=0")
-        fq = subprocess.Popen([BIN, "join", "--no-launch", "--yes"], env=e, stdin=subprocess.PIPE,
-                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        flog = []
-        threading.Thread(target=lambda: [flog.append(l) for l in fq.stdout], daemon=True).start()
-        def fwait(pat, t=8):
-            end = time.time() + t
-            while time.time() < end:
-                if re.search(pat, "".join(flog)): return True
-                time.sleep(0.05)
-            return False
-        check(fwait(r"Connected to user1161"), "linked")
-        time.sleep(1.5)
-        check("favorite added" not in "".join(flog), "linking alone adds nothing to Favorites")
-        fq.stdin.write("F\n"); fq.stdin.flush()
-        check(fwait(r"favorite added: app 223710, 127\.0\.0\.1:27115 \(query 27115\), flags 1, time now"),
-              "the button adds Cry of Fear (app 223710) at 127.0.0.1:27115 as a favorite")
-        check(fwait(r"Added 127\.0\.0\.1:27115 to Cry of Fear's Favorites"), "and the log says where to find it")
-        check(fwait(r"favorite added: app 70, 127\.0\.0\.1:27115"), "test build: also under Half-Life (70)")
-        fq.send_signal(signal.SIGINT)
-        try: fq.wait(5)
-        except subprocess.TimeoutExpired: fq.kill()
-        hfv.stop()
 
         print("[24] host kicks a friend")
         def piped(name, env, args):

@@ -31,8 +31,6 @@ typedef struct {
     void *(*SteamNetUtils)(void);
     void *(*SteamApps)(void);
     uint32_t (*Apps_GetAppInstallDir)(void *self, uint32_t app, char *buf, uint32_t n);
-    int (*MM_AddFavoriteGame)(void *self, uint32_t app, uint32_t ip, uint16_t conn_port, uint16_t query_port,
-                              uint32_t flags, uint32_t last_played);
 
     u64 (*User_GetSteamID)(void *self);
     bool (*User_BLoggedOn)(void *self);

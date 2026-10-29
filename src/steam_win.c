@@ -87,7 +87,6 @@ const char *steam_load(void)
     GET(MM_GetLobbyMemberByIndex, "SteamAPI_ISteamMatchmaking_GetLobbyMemberByIndex");
     GET(MM_InviteUserToLobby, "SteamAPI_ISteamMatchmaking_InviteUserToLobby");
     GET(MM_SetLobbyJoinable, "SteamAPI_ISteamMatchmaking_SetLobbyJoinable");
-    GET(MM_AddFavoriteGame, "SteamAPI_ISteamMatchmaking_AddFavoriteGame");
     GET(NM_SendMessageToUser, "SteamAPI_ISteamNetworkingMessages_SendMessageToUser");
     GET(NM_ReceiveMessagesOnChannel, "SteamAPI_ISteamNetworkingMessages_ReceiveMessagesOnChannel");
     GET(NM_AcceptSessionWithUser, "SteamAPI_ISteamNetworkingMessages_AcceptSessionWithUser");

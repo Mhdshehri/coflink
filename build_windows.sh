@@ -35,7 +35,7 @@ mkdef ws2_32 WSAStartup@8 socket@12 bind@12 connect@12 send@16 recv@16 sendto@24
     select@20 closesocket@4 ioctlsocket@12 getsockname@12 WSAGetLastError@0 WSAIoctl@36
 mkdef msvcrt printf _vsnprintf strlen strcmp strncmp strchr strstr memcpy memset memcmp atoi \
     malloc calloc free fopen fread fwrite fclose fgets fflush exit __iob_func \
-    _ui64toa _strtoui64 __getmainargs time
+    _ui64toa _strtoui64 __getmainargs
 
 # icon, manifest (modern look, sharp text on high-DPI screens) and version info
 llvm-rc -no-preprocess -C 65001 -FO "$OUT/coflink.res" res/coflink.rc
@@ -44,7 +44,7 @@ llvm-cvtres -machine:x86 -out:"$OUT/coflink_res.obj" "$OUT/coflink.res" >/dev/nu
 CFLAGS="--target=i686-w64-windows-gnu -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter
   -ffreestanding -fno-stack-protector -mno-stack-arg-probe -fno-asynchronous-unwind-tables
   -fno-ident -fno-builtin -D_WIN32"
-SRC="src/crt0_win.c src/ui_win.c src/coflink.c src/a2s.c src/lobbycode.c src/plat_win.c src/steam_win.c src/sha256.c"
+SRC="src/crt0_win.c src/ui_win.c src/coflink.c src/lobbycode.c src/plat_win.c src/steam_win.c src/sha256.c"
 
 # shellcheck disable=SC2086
 clang $CFLAGS -fuse-ld=lld -nostdlib -nostartfiles \

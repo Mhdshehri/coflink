@@ -3,7 +3,7 @@
  *   coflink host [--port N] [--players N]
  *   coflink join [lobby id] [--port N] [--no-launch] [--yes]
  * Keys (one per line on stdin): L paste lobby id, S status, G start game,
- * X stop, H host, J join, F add to Favorites, K kick (then friend number), Q quit (the same actions as the window's buttons). */
+ * X stop, H host, J join, K kick (then friend number), Q quit (the same actions as the window's buttons). */
 #include "ui.h"
 #include "plat.h"
 
@@ -74,7 +74,6 @@ bool ui_poll(Cmd *c)
     case 'x': case 'X': c->kind = CMD_STOP; break;
     case 'g': case 'G': c->kind = CMD_LAUNCH; break;
     case 'r': case 'R': c->kind = CMD_REFRESH; break;
-    case 'f': case 'F': c->kind = CMD_FAVORITE; break;
     case 'k': case 'K': /* host: kick friend number N (next line) */
         if (read_line(line, sizeof line)) {
             int k = atoi(line);
