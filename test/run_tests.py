@@ -2,6 +2,13 @@
 
 A fake Cry of Fear server listens on 127.0.0.1:27015 and answers every packet
 with b"S:" + packet. Fake game clients send to the port each joiner opens.
+
+Build the two test programs first, from the repository folder:
+  mkdir -p build
+  SRC="src/coflink.c src/lobbycode.c src/ui_console.c src/plat_posix.c test/steam_mock.c"
+  gcc -std=c11 -fsanitize=address,undefined -o build/coflink_mock $SRC
+  gcc -std=c11 -fsanitize=address,undefined -DVERSION='"9.9.9"' -o build/coflink_mock_new $SRC
+then run:  python3 test/run_tests.py
 """
 import os
 import re
