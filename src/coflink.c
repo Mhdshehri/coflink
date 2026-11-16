@@ -15,7 +15,7 @@
 #include "ui.h"
 
 #ifndef VERSION /* the tests build a second copy with a different version */
-#define VERSION "1.2"
+#define VERSION "1.2.1"
 #endif
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
@@ -136,7 +136,15 @@ static void send_game(u64 to, int slot, const void *p, int n)
     out[0] = (uint8_t)slot;
     memcpy(out + 1, p, (size_t)n);
     /* Cry of Fear (GoldSrc) does its own reliability: send unreliable. */
-    S.NM_SendMessageToUser(NM, id, out, (uint32_t)n + 1, SEND_UNRELIABLE | SEND_NONAGLE, CH_GAME);
+    int r = S.NM_SendMessageToUser(NM, id, out, (uint32_t)n + 1, SEND_UNRELIABLE | SEND_NONAGLE, CH_GAME);
+    if (r == 25 /* k_EResultLimitExceeded: Steam's send queue is full */) {
+        static u64 told_at;
+        u64 t = now_ms();
+        if (!told_at || t - told_at > 10000) { /* at most every 10 s */
+            told_at = t;
+            say("! Steam's queue to %s is full: the game sent more than the relay could carry, some was dropped.", who(to));
+        }
+    }
 }
 
 static void send_ctl(u64 to, char c)
@@ -1304,6 +1312,14 @@ static bool steam_start(void)
        for a direct connection, whatever Steam's own "IP sharing" setting is. */
     if (!S.NU_SetGlobalConfigInt32(NU, 104 /* P2P_Transport_ICE_Enable */, 0 /* disable */))
         say("! Steam would not turn off direct connections; your IP may be shared with the host.");
+    /* Room for Cry of Fear's bursts. Entering a new area, the host's game
+       sends each player the whole area at once (on LAN it doesn't slow down).
+       Steam's defaults (a 512 KB queue, 256 KB/s) dropped that burst, and the
+       players timed out. A bigger queue keeps it all; a higher top rate
+       sends it sooner. */
+    S.NU_SetGlobalConfigInt32(NU, 9 /* SendBufferSize */, 16 * 1024 * 1024);
+    S.NU_SetGlobalConfigInt32(NU, 10 /* SendRateMin */, 256 * 1024);
+    S.NU_SetGlobalConfigInt32(NU, 11 /* SendRateMax */, 2 * 1024 * 1024);
     say("Signed in to Steam as %s.", who(g_me));
     return true;
 }

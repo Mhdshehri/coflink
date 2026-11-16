@@ -426,6 +426,7 @@ static int m_SendMessageToUser(void *s, const void *ident, const void *data, uin
     u64 to = S.Ident_GetSteamID64((void *)ident);
     accept_id(to); /* sending accepts the session, as in real Steam */
     if (!(flags & SEND_RELIABLE) && loss && rand() % 100 < loss) return 1;
+    if (!(flags & SEND_RELIABLE) && getenv("MOCK_QUEUE_FULL")) return 25; /* k_EResultLimitExceeded */
     uint8_t b[70000];
     b[0] = (uint8_t)ch; b[1] = 0;
     memcpy(b + 2, &me, 8);

@@ -251,6 +251,9 @@ def main():
         check("CoFLink (" not in a.log + host.log, "same version: no version notice")
         check("[mock] global config 104 = 0" in host.log and "[mock] global config 104 = 0" in a.log,
               "both sides turn off direct connections (IP never shared, always Valve's relay)")
+        check(all(x in host.log for x in ("[mock] global config 9 = 16777216", "[mock] global config 10 = 262144",
+                                          "[mock] global config 11 = 2097152")),
+              "room for a new area's burst: 16 MB send queue, up to 2 MB/s (was 512 KB, 256 KB/s)")
         big = game_client(pa, "BIG", n=3, size=9000, timeout=0.5)
         check(big == 0 and srv.biggest <= 8192, "oversized packets (9000 bytes) are dropped")
 
@@ -745,6 +748,22 @@ def main():
         check(lap2.wait_for(r"Found user1191 hosting") is not None and "user1192 hosting" not in lap2.log,
               "once friends with the host, the laptop sees the real host (and only the host)")
         lap2.stop(); pc.stop(); hs3.stop()
+
+        print("[28] Steam's send queue full: said, not silent")
+        hq = Proc("HQ", dict(base, MOCK_ID="1201", MOCK_FRIENDS="1202", MOCK_QUEUE_FULL="1"), ["host"])
+        procs.append(hq)
+        hq.wait_for(r"Lobby is ready")
+        jq = Proc("JQ", dict(base, MOCK_ID="1202", MOCK_FRIENDS="1201"), ["join", "--yes"])
+        procs.append(jq)
+        jq.wait_for(r"Connected to user1201")
+        jq_port = int(re.search(r"connect 127\.0\.0\.1:(\d+)", jq.log).group(1))
+        game = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        for _ in range(30):
+            game.sendto(b"\xff\xff\xff\xffgetchallenge steam\n", ("127.0.0.1", jq_port)); time.sleep(0.05)
+        game.close()
+        check(hq.wait_for(r"Steam's queue to user1202 is full", 8) is not None and hq.log.count("queue to user1202 is full") == 1,
+              "the host is told once (not once per packet) that Steam's queue was full")
+        jq.stop(); hq.stop()
 
         print("[8] bad internet: 10% of packets lost each way")
         h3 = Proc("H3", dict(base, MOCK_ID="1021", MOCK_FRIENDS="1022", MOCK_LOSS="10"), ["host"])
