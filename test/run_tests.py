@@ -527,13 +527,14 @@ def main():
         g1 = os.path.join(d, "steamlib1", "Cry of Fear"); os.makedirs(g1)
         open(os.path.join(g1, "cof.exe"), "w").close()
         open(os.path.join(g1, "CoFLaunchApp.exe"), "w").close()
-        def launch_log(env):
+        def launch_log(env, display=None, wait=1.5):
             e = dict(os.environ, **base, MOCK_ID="1121", MOCK_FRIENDS="", ASAN_OPTIONS="detect_leaks=0", **env)
             q = subprocess.Popen([BIN, "idle"], env=e, stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             time.sleep(1.0)
+            if display: q.stdin.write("V\n" + display + "\n")
             q.stdin.write("G\n"); q.stdin.flush()
-            time.sleep(1.5)
+            time.sleep(wait)
             q.send_signal(signal.SIGINT)
             out, _ = q.communicate(timeout=5)
             return out
@@ -557,6 +558,25 @@ def main():
               "game folder not found: falls back to starting it through Steam")
         out = launch_log({"MOCK_COF_DIR": g1, "MOCK_COF": "1"})
         check("Cry of Fear is already running" in out and "would run" not in out, "doesn't start a second copy")
+
+        print("[27] Display: fullscreen, windowed, borderless, resolution")
+        opts = "-basedir cryoffear -game cryoffear -hw -heapsize 1536000"
+        out = launch_log({"MOCK_COF_DIR": g1}, "1 1920 1080")
+        check(f"cof.exe {opts} -full -w 1920 -h 1080 (in" in out and "in fullscreen at 1920x1080" in out,
+              "fullscreen at a chosen resolution")
+        out = launch_log({"MOCK_COF_DIR": g1}, "2 1280 720")
+        check(f"cof.exe {opts} -window -w 1280 -h 720 (in" in out, "windowed at a chosen resolution")
+        out = launch_log({"MOCK_COF_DIR": g1}, "2 0 0")
+        check(f"cof.exe {opts} -window (in" in out, "windowed at the game's own resolution")
+        out = launch_log({"MOCK_COF_DIR": g1}, "3 2560 1440", wait=3.0)
+        check(f"cof.exe {opts} -window -noborder -w 2560 -h 1440 (in" in out, "borderless: a window the size of the screen")
+        check("[mock] made the window of pid 4242 borderless" in out and out.count("Cry of Fear is now borderless.") == 1,
+              "borderless: CoFLink takes the frame off the game's window once it appears (said once)")
+        out = launch_log({"MOCK_COF_DIR": g1}, "1 5 99999")
+        check(f"cof.exe {opts} -full (in" in out, "a nonsense size is ignored (the game's own resolution)")
+        out = launch_log({}, "3 1920 1080")
+        check("would open steam://run/223710" in out and "only works when CoFLink starts the game itself" in out,
+              "started through Steam instead: says the Display choice can't apply")
 
         print("[21] Refresh: see right away when a friend starts hosting")
         e = dict(os.environ, **base, MOCK_ID="1142", MOCK_FRIENDS="1141", ASAN_OPTIONS="detect_leaks=0")

@@ -15,7 +15,7 @@
 #include "ui.h"
 
 #ifndef VERSION /* the tests build a second copy with a different version */
-#define VERSION "1.0"
+#define VERSION "1.1"
 #endif
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
@@ -996,14 +996,55 @@ static bool find_cof_dir(char *out, int n)
     return found;
 }
 
-static void start_game(void)
+/* Borderless: the game starts in a window the size of the screen, then
+   CoFLink takes the frame off that window (Cry of Fear's own -noborder only
+   hides the buttons). Nothing is injected; the game may re-create its window
+   while it starts, so it is checked for a while. */
+static uint32_t g_bl_pid;
+static u64 g_bl_until, g_bl_last;
+static bool g_bl_said;
+
+static void borderless_tick(u64 t)
+{
+    if (!g_bl_pid || t - g_bl_last < 500) return;
+    g_bl_last = t;
+    if (t > g_bl_until) { g_bl_pid = 0; return; }
+    if (window_make_borderless(g_bl_pid) == 1 && !g_bl_said) {
+        g_bl_said = true;
+        say("Cry of Fear is now borderless.");
+    }
+}
+
+static void start_game(u64 display)
 {
     if (process_running("cof.exe")) { say("Cry of Fear is already running."); return; }
+    int mode = (int)(display & 0xFF);
+    unsigned w = (unsigned)((display >> 8) & 0xFFFFFF), h = (unsigned)((display >> 32) & 0xFFFFFF);
+    if (w < 320 || h < 200 || w > 16384 || h > 16384) w = h = 0; /* not a real size: the game's own */
+    char args[256], size[40] = "";
+    if (w) sfmt(size, sizeof size, " -w %u -h %u", w, h);
+    const char *how = "";
+    switch (mode) {
+    case DISPLAY_FULL: sfmt(args, sizeof args, "%s -full%s", COF_ARGS, size); how = " in fullscreen"; break;
+    case DISPLAY_WINDOW: sfmt(args, sizeof args, "%s -window%s", COF_ARGS, size); how = " in a window"; break;
+    case DISPLAY_BORDERLESS: sfmt(args, sizeof args, "%s -window -noborder%s", COF_ARGS, size); how = " borderless"; break;
+    default: sfmt(args, sizeof args, "%s", COF_ARGS); mode = DISPLAY_DEFAULT; break;
+    }
     char dir[600], exe[700];
     if (g_steam_ok && find_cof_dir(dir, sizeof dir)) {
         sfmt(exe, sizeof exe, "%s" PATHSEP "cof.exe", dir);
-        if (run_program(exe, COF_ARGS, dir)) {
-            say("Starting Cry of Fear (the game itself, without its launcher)...");
+        uint32_t pid = 0;
+        if (run_program(exe, args, dir, &pid)) {
+            if (w && mode != DISPLAY_DEFAULT)
+                say("Starting Cry of Fear%s at %ux%u (the game itself, without its launcher)...", how, w, h);
+            else
+                say("Starting Cry of Fear%s (the game itself, without its launcher)...", how);
+            if (mode == DISPLAY_BORDERLESS) {
+                g_bl_pid = pid;
+                g_bl_until = now_ms() + 120000;
+                g_bl_last = 0;
+                g_bl_said = false;
+            }
             return;
         }
         say("! Could not start %s.", exe);
@@ -1012,6 +1053,7 @@ static void start_game(void)
     }
     open_url("steam://run/223710");
     say("Starting Cry of Fear through Steam instead...");
+    if (mode != DISPLAY_DEFAULT) say("(The Display choice only works when CoFLink starts the game itself.)");
 }
 
 /* ---------- modes ---------- */
@@ -1132,8 +1174,8 @@ static void handle_cmd(const Cmd *c)
         if (g_mode == MODE_JOIN) { g_joining = 0; request_join(c->arg); }
         break;
     case CMD_KICK: kick_peer(c->arg); break;
-    case CMD_LAUNCH: /* "Start Cry of Fear" */
-        start_game();
+    case CMD_LAUNCH: /* "Start Cry of Fear", with the Display choice */
+        start_game(c->arg);
         break;
     case CMD_REFRESH: /* look for a hosting friend right now */
         if (g_is_host) { say("You are hosting. Refresh is for finding a friend who hosts."); break; }
@@ -1174,6 +1216,7 @@ void engine_run(const EngineOpts *o, Cmd first)
             drain_steam();
         }
         u64 t = now_ms();
+        borderless_tick(t);
         if (g_mode != prev_mode) { last_scan = 0; last_friends = 0; prev_mode = g_mode; }
         if (g_mode == MODE_HOST) {
             host_tick();

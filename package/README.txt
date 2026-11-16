@@ -1,4 +1,4 @@
-CoFLink 1.0 - Cry of Fear co-op with a Steam friend
+CoFLink 1.1 - Cry of Fear co-op with a Steam friend
 =====================================================
 No VPN (no Hamachi/Radmin), no port forwarding, no IP addresses.
 One program for both players: open CoFLink.exe and click a button.
@@ -11,7 +11,7 @@ Both of you need: Windows, Steam running and logged in, Cry of Fear
 installed from Steam, and this whole folder (unzip it anywhere, e.g. Desktop).
 Keep CoFLink.exe and steam_api.dll together in the same folder.
 You must be Steam friends with the host. Up to 4 players (host + 3).
-Use the same CoFLink version, the latest (1.0).
+Use the same CoFLink version, the latest (1.1).
 
 Before the first game, both of you: in Steam, right-click Cry of Fear ->
 Properties -> Installed Files -> "Verify integrity of game files".
@@ -55,11 +55,26 @@ CoFLink only LINKS you to the host. You join the game yourself.
 5. Keep CoFLink open while you play.
 
 
+DISPLAY (fullscreen, windowed, borderless, resolution)
+-------------------------------------------------------
+The "Display" button next to "Start Cry of Fear" picks how the game starts:
+- Game's own setting: as before (whatever the game last used).
+- Fullscreen or Windowed, at the resolution you pick (the list shows the
+  sizes your screen supports).
+- Borderless: a window the size of your screen with no frame, so alt-tab
+  is instant. CoFLink starts the game in a window and takes the frame off.
+Your choice is remembered. It only works when you start the game with
+CoFLink's "Start Cry of Fear" button (not from Steam).
+Blurry or the picture sits in a corner? Right-click cof.exe in the Cry of
+Fear folder -> Properties -> Compatibility -> Change high DPI settings ->
+tick "Override high DPI scaling behavior" (Application).
+
+
 IS IT SAFE?
 -----------
 - Nothing is installed, no settings or registry are changed. CoFLink only
-  writes steam_appid.txt (containing 480) and coflink_theme.txt (dark or
-  light) into its own folder. To remove it, delete the folder.
+  writes steam_appid.txt (containing 480), coflink_theme.txt (dark or
+  light) and coflink_display.txt (your Display choice) into its own folder. To remove it, delete the folder.
   (Older test versions could add 127.0.0.1:27115 to Steam's server
   Favorites; remove it in Steam -> View -> Game Servers -> Favorites.)
 - No ports are opened on your PC or router. CoFLink only talks to programs

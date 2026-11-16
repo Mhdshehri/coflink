@@ -27,7 +27,7 @@ Both players unzip the [latest release](../../releases/latest) and open **CoFLin
 2. When the host's game is up, click **Start Cry of Fear**.
 3. In the main menu press `~`, then `Ctrl+V` and `Enter`. The connect command is already copied.
 
-The **How to** tab in CoFLink walks you through each step. The full guide is [in the zip](package/README.txt).
+The **Display** button picks fullscreen, windowed or borderless, and the resolution. The **How to** tab in CoFLink walks you through each step. The full guide is [in the zip](package/README.txt).
 
 ## Safety
 

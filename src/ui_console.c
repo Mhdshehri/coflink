@@ -3,7 +3,7 @@
  *   coflink host [--port N] [--players N]
  *   coflink join [lobby id] [--port N] [--yes]
  * Keys (one per line on stdin): L paste lobby id, S status, G start game,
- * X stop, H host, J join, K kick (then friend number), Q quit (the same actions as the window's buttons). */
+ * X stop, H host, J join, G start the game (V sets its display first), K kick (then friend number), Q quit (the same actions as the window's buttons). */
 #include "ui.h"
 #include "plat.h"
 
@@ -66,6 +66,8 @@ u64 ui_offer_hosts(int n, const UiPerson *p, u64 *reject)
     return 0;
 }
 
+static u64 g_display; /* V: Display choice used by G */
+
 bool ui_poll(Cmd *c)
 {
     int key = key_poll();
@@ -77,7 +79,17 @@ bool ui_poll(Cmd *c)
     case 'q': case 'Q': c->kind = CMD_QUIT; break;
     case 's': case 'S': c->kind = CMD_STATUS; break;
     case 'x': case 'X': c->kind = CMD_STOP; break;
-    case 'g': case 'G': c->kind = CMD_LAUNCH; break;
+    case 'g': case 'G': c->kind = CMD_LAUNCH; c->arg = g_display; break;
+    case 'v': case 'V': /* Display choice for G (next line: mode width height) */
+        if (read_line(line, sizeof line)) {
+            unsigned m = 0, w = 0, h = 0;
+            char *p = line;
+            m = (unsigned)strtoul(p, &p, 10);
+            w = (unsigned)strtoul(p, &p, 10);
+            h = (unsigned)strtoul(p, &p, 10);
+            g_display = DISPLAY_ARG(m, w, h);
+        }
+        return false;
     case 'r': case 'R': c->kind = CMD_REFRESH; break;
     case 'k': case 'K': /* host: kick friend number N (next line) */
         if (read_line(line, sizeof line)) {

@@ -88,6 +88,12 @@ typedef struct { UINT size; HWND hwnd; DWORD flags; UINT count; DWORD timeout; }
 IMP BOOL WINAPI FlashWindowEx(const FLASHWINFO *f);
 IMP HWND WINAPI GetForegroundWindow(void);
 IMP BOOL WINAPI MessageBeep(UINT type);
+IMP HMENU WINAPI CreatePopupMenu(void);
+IMP BOOL WINAPI AppendMenuW(HMENU m, UINT flags, uintptr_t id, const WCHAR *text);
+IMP BOOL WINAPI TrackPopupMenu(HMENU m, UINT flags, int x, int y, int reserved, HWND w, const RECT *r);
+IMP BOOL WINAPI DestroyMenu(HMENU m);
+IMP BOOL WINAPI EnumDisplaySettingsW(const WCHAR *device, DWORD mode, void *devmode);
+IMP BOOL WINAPI GetWindowRect(HWND w, RECT *r);
 IMP void *WINAPI LoadLibraryExA(const char *path, void *file, DWORD flags);
 IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 
@@ -156,7 +162,7 @@ IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 
 enum {
     ID_HOST = 101, ID_JOIN, ID_STOP, ID_STATUS, ID_LOBBY, ID_COPYID, ID_JOINID,
-    ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME, ID_TAB_HOWTO, ID_TAB_LOG, ID_COPYLOG, ID_HOWTO,
+    ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME, ID_TAB_HOWTO, ID_TAB_LOG, ID_COPYLOG, ID_HOWTO, ID_DISPLAY,
     ID_LOBBYLABEL,
 };
 
@@ -342,6 +348,138 @@ static void apply_system_parts(void)
         theme(g_c[ID_HOWTO], name, 0);
         theme(g_c[ID_LIST], name, 0);
     }
+}
+
+/* ---------- "Display": how Start Cry of Fear starts the game ---------- */
+
+static WCHAR *wide(const char *s, WCHAR *buf, int n);
+
+typedef struct { unsigned w, h; } Res;
+static int g_disp_mode;           /* DISPLAY_* */
+static unsigned g_disp_w, g_disp_h; /* 0 = the game's own resolution */
+static Res g_res[32];
+static int g_nres;
+static Res g_desktop;
+
+/* screen sizes Windows offers for the main monitor, biggest first */
+static void load_resolutions(void)
+{
+    uint8_t dm[220]; /* DEVMODEW */
+    g_nres = 0;
+    for (DWORD i = 0; g_nres < 32; i++) {
+        memset(dm, 0, sizeof dm);
+        dm[68] = 220; /* dmSize */
+        if (!EnumDisplaySettingsW(0, i, dm)) break;
+        unsigned w, h;
+        memcpy(&w, dm + 172, 4); /* dmPelsWidth */
+        memcpy(&h, dm + 176, 4); /* dmPelsHeight */
+        if (w < 800 || h < 600) continue;
+        bool dup = false;
+        for (int k = 0; k < g_nres; k++) dup |= g_res[k].w == w && g_res[k].h == h;
+        if (!dup) g_res[g_nres++] = (Res){ w, h };
+    }
+    for (int a = 0; a < g_nres; a++) /* biggest first */
+        for (int b = a + 1; b < g_nres; b++)
+            if ((u64)g_res[b].w * g_res[b].h > (u64)g_res[a].w * g_res[a].h) { Res t = g_res[a]; g_res[a] = g_res[b]; g_res[b] = t; }
+    memset(dm, 0, sizeof dm);
+    dm[68] = 220;
+    if (EnumDisplaySettingsW(0, 0xFFFFFFFFu /* current */, dm)) {
+        memcpy(&g_desktop.w, dm + 172, 4);
+        memcpy(&g_desktop.h, dm + 176, 4);
+    }
+}
+
+static void display_label(void)
+{
+    static const char *names[] = { "Display: game's own", "Fullscreen", "Windowed", "Borderless" };
+    char t[64];
+    if (g_disp_mode == DISPLAY_DEFAULT) sfmt(t, sizeof t, "%s", names[0]);
+    else if (g_disp_mode == DISPLAY_BORDERLESS || !g_disp_w) sfmt(t, sizeof t, "%s", names[g_disp_mode]);
+    else sfmt(t, sizeof t, "%s %ux%u", names[g_disp_mode], g_disp_w, g_disp_h);
+    WCHAR w[64];
+    SetWindowTextW(g_c[ID_DISPLAY], wide(t, w, 64));
+}
+
+static void save_display(void)
+{
+    char t[64];
+    sfmt(t, sizeof t, "%d %u %u\n", g_disp_mode, g_disp_w, g_disp_h);
+    file_write_text("coflink_display.txt", t);
+}
+
+static void load_display(void)
+{
+    FILE *f = fopen("coflink_display.txt", "rb");
+    if (!f) return; /* first start: the game's own setting */
+    char b[64] = { 0 };
+    fread(b, 1, sizeof b - 1, f);
+    fclose(f);
+    unsigned v[3] = { 0, 0, 0 };
+    int k = 0;
+    for (char *p = b; *p && k < 3; ) {
+        while (*p == ' ') p++;
+        if (*p < '0' || *p > '9') break;
+        while (*p >= '0' && *p <= '9') { if (v[k] < 100000) v[k] = v[k] * 10 + (unsigned)(*p - '0'); p++; }
+        k++;
+    }
+    g_disp_mode = v[0] <= DISPLAY_BORDERLESS ? (int)v[0] : DISPLAY_DEFAULT;
+    g_disp_w = v[1];
+    g_disp_h = v[2];
+    if (g_disp_w < 320 || g_disp_h < 200) g_disp_w = g_disp_h = 0;
+}
+
+/* what Start Cry of Fear sends to the engine */
+static u64 display_arg(void)
+{
+    if (g_disp_mode == DISPLAY_BORDERLESS) /* always the screen's own size */
+        return DISPLAY_ARG(DISPLAY_BORDERLESS, g_desktop.w, g_desktop.h);
+    return DISPLAY_ARG(g_disp_mode, g_disp_w, g_disp_h);
+}
+
+static void display_menu(void)
+{
+    enum { M_MODE = 1, M_RES_GAME = 10, M_RES = 20 };
+    load_resolutions();
+    HMENU m = CreatePopupMenu();
+    if (!m) return;
+    const UINT ON = 0x8 /* checked */, OFF = 0x3 /* greyed */, SEP = 0x800;
+    static const char *modes[] = { "Game's own setting", "Fullscreen", "Windowed", "Borderless (fills the screen)" };
+    WCHAR w[96];
+    AppendMenuW(m, OFF, 0, WTEXT("Mode"));
+    for (int i = 0; i < 4; i++)
+        AppendMenuW(m, g_disp_mode == i ? ON : 0, M_MODE + i, wide(modes[i], w, 96));
+    AppendMenuW(m, SEP, 0, 0);
+    bool fixed = g_disp_mode == DISPLAY_BORDERLESS || g_disp_mode == DISPLAY_DEFAULT;
+    AppendMenuW(m, OFF, 0, fixed ? (g_disp_mode == DISPLAY_BORDERLESS ? WTEXT("Resolution: your screen's") : WTEXT("Resolution: the game's own"))
+                                 : WTEXT("Resolution"));
+    if (!fixed) {
+        AppendMenuW(m, !g_disp_w ? ON : 0, M_RES_GAME, WTEXT("Game's own resolution"));
+        for (int i = 0; i < g_nres; i++) {
+            char t[40];
+            bool screen = g_res[i].w == g_desktop.w && g_res[i].h == g_desktop.h;
+            sfmt(t, sizeof t, "%u x %u%s", g_res[i].w, g_res[i].h, screen ? "  (your screen)" : "");
+            AppendMenuW(m, g_disp_w == g_res[i].w && g_disp_h == g_res[i].h ? ON : 0, M_RES + i, wide(t, w, 96));
+        }
+    }
+    AppendMenuW(m, SEP, 0, 0);
+    AppendMenuW(m, OFF, 0, WTEXT("Used by Start Cry of Fear"));
+    RECT r;
+    GetWindowRect(g_c[ID_DISPLAY], &r);
+    int id = (int)TrackPopupMenu(m, 0x100 /* return the choice */ | 0x8 /* top aligned */, r.left, r.bottom, 0, g_wnd, 0);
+    DestroyMenu(m);
+    if (id >= M_MODE && id < M_MODE + 4) {
+        g_disp_mode = id - M_MODE;
+        if (g_disp_mode == DISPLAY_FULL && !g_disp_w) { g_disp_w = g_desktop.w; g_disp_h = g_desktop.h; } /* sensible start */
+    } else if (id == M_RES_GAME) {
+        g_disp_w = g_disp_h = 0;
+    } else if (id >= M_RES && id < M_RES + g_nres) {
+        g_disp_w = g_res[id - M_RES].w;
+        g_disp_h = g_res[id - M_RES].h;
+    } else {
+        return;
+    }
+    save_display();
+    display_label();
 }
 
 static void save_theme(void) { file_write_text("coflink_theme.txt", T.dark ? "dark\n" : "light\n"); }
@@ -537,6 +675,7 @@ static void build(void)
     ctl(ID_REFRESH, B, WTEXT("Refresh"), OD, 0, 452, 230, 134, 30, g_font);
     ctl(ID_LAUNCH, B, WTEXT("Start Cry of Fear"), OD, 0, 14, 312, 180, 30, g_font);
     ctl(ID_COPYCONN, B, WTEXT("Copy connect command"), OD, 0, 204, 312, 200, 30, g_font);
+    ctl(ID_DISPLAY, B, WTEXT("Display"), OD, 0, 410, 312, 176, 30, g_font);
     ctl(ID_TAB_HOWTO, B, WTEXT("How to"), OD, 0, 14, 350, 96, 28, g_font);
     ctl(ID_TAB_LOG, B, WTEXT("Log"), OD, 0, 114, 350, 80, 28, g_font);
     ctl(ID_COPYLOG, B, WTEXT("Copy log"), OD, 0, 486, 350, 100, 26, g_font);
@@ -816,7 +955,8 @@ static void on_command(int id, int code)
         if (g_shown.mode != MODE_HOST && !g_shown.lobby && SendMessageW(g_c[ID_LOBBY], WM_GETTEXTLENGTH, 0, 0) > 0)
             on_command(ID_JOINID, 0);
         break;
-    case ID_LAUNCH: push_cmd(CMD_LAUNCH, 0); break;
+    case ID_LAUNCH: push_cmd(CMD_LAUNCH, display_arg()); break;
+    case ID_DISPLAY: display_menu(); break;
     case ID_REFRESH: push_cmd(CMD_REFRESH, 0); break;
     case ID_TAB_HOWTO: show_tab(false); break;
     case ID_TAB_LOG: show_tab(true); break;
@@ -935,6 +1075,9 @@ int main(int argc, char **argv)
                             y < 0 ? 0 : y, ww, wh, 0, 0, inst, 0);
     if (!g_wnd) return 1;
     build();
+    load_display();     /* the Display choice from last time */
+    load_resolutions();
+    display_label();
     set_theme(T.dark); /* button label, title bar, scrollbars */
     show_tab(false); /* start on "How to" */
     on_timer();

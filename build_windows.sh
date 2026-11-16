@@ -26,7 +26,10 @@ mkdef user32 OpenClipboard@4 EmptyClipboard@0 SetClipboardData@8 CloseClipboard@
     GetWindowTextW@12 SetTimer@16 MessageBoxW@16 LoadCursorW@8 LoadIconW@8 ShowWindow@8 \
     UpdateWindow@4 EnableWindow@8 DestroyWindow@4 GetDC@4 ReleaseDC@8 AdjustWindowRectEx@16 \
     GetSystemMetrics@4 FillRect@12 DrawTextW@20 GetClientRect@8 RedrawWindow@16 \
-    FlashWindowEx@4 GetForegroundWindow@0 MessageBeep@4
+    FlashWindowEx@4 GetForegroundWindow@0 MessageBeep@4 \
+    EnumWindows@8 GetWindowThreadProcessId@8 IsWindowVisible@4 GetWindow@8 GetWindowLongW@8 \
+    SetWindowLongW@12 GetWindowRect@8 SetWindowPos@28 MonitorFromWindow@8 GetMonitorInfoW@8 \
+    CreatePopupMenu@0 AppendMenuW@16 TrackPopupMenu@28 DestroyMenu@4 EnumDisplaySettingsW@12
 mkdef gdi32 CreateFontW@56 GetDeviceCaps@8 CreateSolidBrush@4 CreatePen@12 SelectObject@8 DeleteObject@4 \
     GetStockObject@4 SetTextColor@8 SetBkColor@8 SetBkMode@8 RoundRect@28
 mkdef comctl32 InitCommonControls@0

@@ -28,7 +28,10 @@ void clipboard_set(const char *text);
 bool process_running(const char *exe_name); /* e.g. "cof.exe", case-insensitive */
 void open_url(const char *url);
 bool file_exists(const char *path);
-bool run_program(const char *exe, const char *args, const char *dir); /* start it, don't wait */
+bool run_program(const char *exe, const char *args, const char *dir, uint32_t *pid); /* start it, don't wait */
+/* Borderless: take the frame off that program's main window and fit it to its
+   screen. 0 = no window yet, 1 = done now, 2 = was already borderless. */
+int window_make_borderless(uint32_t pid);
 bool steam_install_path(char *out, int n); /* Steam's own folder (from the registry) */
 #ifdef _WIN32
 #define PATHSEP "\\"

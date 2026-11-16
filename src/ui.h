@@ -10,7 +10,7 @@ typedef enum {
     CMD_HOST,        /* start hosting */
     CMD_JOIN,        /* start looking for a host */
     CMD_JOIN_LOBBY,  /* arg = lobby id */
-    CMD_LAUNCH,      /* start Cry of Fear (through Steam, as usual) */
+    CMD_LAUNCH,      /* start Cry of Fear; arg = display choice, see DISPLAY_* */
     CMD_REFRESH,     /* look for a hosting friend right now */
     CMD_KICK,        /* host: arg = friend's Steam id */
     CMD_STATUS,      /* print a status line */
@@ -19,6 +19,11 @@ typedef enum {
 } CmdKind;
 
 typedef struct { CmdKind kind; u64 arg; } Cmd;
+
+/* "Display" choice for Start Cry of Fear, packed into CMD_LAUNCH's arg:
+   mode in bits 0-7, width in bits 8-31, height in bits 32-55 (0 = game's own) */
+enum { DISPLAY_DEFAULT = 0, DISPLAY_FULL = 1, DISPLAY_WINDOW = 2, DISPLAY_BORDERLESS = 3 };
+#define DISPLAY_ARG(mode, w, h) ((u64)(mode) | ((u64)(w) << 8) | ((u64)(h) << 32))
 
 enum { MODE_IDLE = 0, MODE_HOST = 1, MODE_JOIN = 2 };
 

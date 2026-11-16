@@ -123,10 +123,18 @@ void clipboard_set(const char *t) { (void)t; }
 bool process_running(const char *n) { (void)n; const char *e = getenv("MOCK_COF"); return e && *e == '1'; }
 void open_url(const char *u) { printf("[mock] would open %s\n", u); }
 bool file_exists(const char *path) { return access(path, F_OK) == 0; }
-bool run_program(const char *exe, const char *args, const char *dir)
+bool run_program(const char *exe, const char *args, const char *dir, uint32_t *pid)
 {
     printf("[mock] would run %s %s (in %s)\n", exe, args, dir);
+    *pid = 4242;
     return true;
+}
+int window_make_borderless(uint32_t pid)
+{
+    static int calls;
+    if (++calls < 3) return 0; /* the window shows up a moment later */
+    if (calls == 3) { printf("[mock] made the window of pid %u borderless\n", pid); return 1; }
+    return 2;
 }
 bool steam_install_path(char *out, int n)
 {

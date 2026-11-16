@@ -39,6 +39,17 @@ IMP BOOL WINAPI EmptyClipboard(void);
 IMP HANDLE WINAPI SetClipboardData(UINT fmt, HANDLE h);
 IMP BOOL WINAPI CloseClipboard(void);
 IMP HANDLE WINAPI ShellExecuteA(HANDLE w, const char *op, const char *file, const char *params, const char *dir, int show);
+IMP BOOL WINAPI EnumWindows(BOOL(WINAPI *cb)(HANDLE w, intptr_t l), intptr_t l);
+IMP DWORD WINAPI GetWindowThreadProcessId(HANDLE w, DWORD *pid);
+IMP BOOL WINAPI IsWindowVisible(HANDLE w);
+IMP HANDLE WINAPI GetWindow(HANDLE w, UINT cmd);
+IMP long WINAPI GetWindowLongW(HANDLE w, int i);
+IMP long WINAPI SetWindowLongW(HANDLE w, int i, long v);
+IMP BOOL WINAPI GetWindowRect(HANDLE w, void *r);
+IMP BOOL WINAPI SetWindowPos(HANDLE w, HANDLE after, int x, int y, int cx, int cy, UINT flags);
+IMP HANDLE WINAPI MonitorFromWindow(HANDLE w, DWORD flags);
+typedef struct { DWORD size; long l, t, r, b, wl, wt, wr, wb; DWORD flags; } MonInfo;
+IMP BOOL WINAPI GetMonitorInfoW(HANDLE m, MonInfo *mi);
 
 struct sockaddr_in4 { uint16_t family; uint16_t port; uint32_t addr; uint8_t zero[8]; };
 typedef struct { UINT count; SOCKET fd[64]; } fd_set_w;
@@ -210,7 +221,7 @@ bool file_exists(const char *path)
     return a != 0xFFFFFFFFu && !(a & 0x10 /* directory */);
 }
 
-bool run_program(const char *exe, const char *args, const char *dir)
+bool run_program(const char *exe, const char *args, const char *dir, uint32_t *pid)
 {
     static char cmd[1400];
     sfmt(cmd, sizeof cmd, "\"%s\" %s", exe, args);
@@ -220,9 +231,49 @@ bool run_program(const char *exe, const char *args, const char *dir)
     ProcInfo pi;
     memset(&pi, 0, sizeof pi);
     if (!CreateProcessA(exe, cmd, 0, 0, 0, 0, 0, dir, &si, &pi)) return false;
+    *pid = (uint32_t)pi.pid;
     CloseHandle(pi.thread);
     CloseHandle(pi.process);
     return true;
+}
+
+/* the biggest visible top-level window of that process: the game's own window */
+typedef struct { DWORD pid; HANDLE w; long area; } FindWin;
+static BOOL WINAPI find_win(HANDLE w, intptr_t l)
+{
+    FindWin *f = (FindWin *)l;
+    DWORD p = 0;
+    GetWindowThreadProcessId(w, &p);
+    if (p != f->pid || !IsWindowVisible(w) || GetWindow(w, 4 /* GW_OWNER */)) return 1;
+    long r[4];
+    if (!GetWindowRect(w, r)) return 1;
+    long area = (r[2] - r[0]) * (r[3] - r[1]);
+    if (area > f->area) { f->area = area; f->w = w; }
+    return 1;
+}
+
+int window_make_borderless(uint32_t pid)
+{
+    FindWin f = { pid, 0, 0 };
+    EnumWindows(find_win, (intptr_t)&f);
+    if (!f.w) return 0;
+    const long frame = 0xC00000L /* caption + border */ | 0x40000L /* sizing */ | 0x80000L /* system menu */ |
+                       0x20000L | 0x10000L /* min/max buttons */;
+    const long exframe = 0x1L | 0x100L | 0x200L | 0x20000L; /* dialog, window, client and static edges */
+    long st = GetWindowLongW(f.w, -16 /* GWL_STYLE */), ex = GetWindowLongW(f.w, -20 /* GWL_EXSTYLE */);
+    MonInfo mi;
+    memset(&mi, 0, sizeof mi);
+    mi.size = sizeof mi;
+    if (!GetMonitorInfoW(MonitorFromWindow(f.w, 2 /* nearest */), &mi)) return 0;
+    long r[4];
+    GetWindowRect(f.w, r);
+    bool fits = r[0] == mi.l && r[1] == mi.t && r[2] == mi.r && r[3] == mi.b;
+    if (!(st & frame) && !(ex & exframe) && fits) return 2;
+    SetWindowLongW(f.w, -16, st & ~frame);
+    SetWindowLongW(f.w, -20, ex & ~exframe);
+    SetWindowPos(f.w, 0, mi.l, mi.t, mi.r - mi.l, mi.b - mi.t,
+                 0x20 /* frame changed */ | 0x4 /* keep z-order */ | 0x200 /* no owner z-order */ | 0x40 /* show */);
+    return 1;
 }
 
 bool steam_install_path(char *out, int n)
