@@ -139,7 +139,7 @@ TROUBLESHOOTING (read the log at the bottom of the window)
     Host/Join again.
 "steam_api.dll is not the expected file / missing": use the steam_api.dll
     from this zip, in the same folder as CoFLink.exe.
-Friend: the host never shows up:  check you both have CoFLink 1.0 and are
+Friend: the host never shows up:  check you both have the latest CoFLink and are
     Steam friends. Or ask for the lobby code ("Copy code" on the host's
     side) and use "Join this code".
 "uses a different CoFLink version":  both of you download the latest version.
