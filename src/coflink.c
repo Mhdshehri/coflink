@@ -15,7 +15,7 @@
 #include "ui.h"
 
 #ifndef VERSION /* the tests build a second copy with a different version */
-#define VERSION "1.1"
+#define VERSION "1.2"
 #endif
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
@@ -1018,10 +1018,11 @@ static void borderless_tick(u64 t)
 static void start_game(u64 display)
 {
     if (process_running("cof.exe")) { say("Cry of Fear is already running."); return; }
-    int mode = (int)(display & 0xFF);
+    int mode = (int)(display & 0x0F);
+    bool dpi = display & DISPLAY_DPI, raw = display & DISPLAY_RAWMOUSE;
     unsigned w = (unsigned)((display >> 8) & 0xFFFFFF), h = (unsigned)((display >> 32) & 0xFFFFFF);
     if (w < 320 || h < 200 || w > 16384 || h > 16384) w = h = 0; /* not a real size: the game's own */
-    char args[256], size[40] = "";
+    char args[320], size[40] = "";
     if (w) sfmt(size, sizeof size, " -w %u -h %u", w, h);
     const char *how = "";
     switch (mode) {
@@ -1030,15 +1031,21 @@ static void start_game(u64 display)
     case DISPLAY_BORDERLESS: sfmt(args, sizeof args, "%s -window -noborder%s", COF_ARGS, size); how = " borderless"; break;
     default: sfmt(args, sizeof args, "%s", COF_ARGS); mode = DISPLAY_DEFAULT; break;
     }
+    if (raw) { /* the game reads the mouse itself; Windows' acceleration is left out */
+        size_t n = strlen(args);
+        sfmt(args + n, (int)(sizeof args - n), " -noforcemaccel -noforcemparms -noforcemspd +m_rawinput 1");
+    }
     char dir[600], exe[700];
     if (g_steam_ok && find_cof_dir(dir, sizeof dir)) {
         sfmt(exe, sizeof exe, "%s" PATHSEP "cof.exe", dir);
         uint32_t pid = 0;
-        if (run_program(exe, args, dir, &pid)) {
-            if (w && mode != DISPLAY_DEFAULT)
-                say("Starting Cry of Fear%s at %ux%u (the game itself, without its launcher)...", how, w, h);
-            else
-                say("Starting Cry of Fear%s (the game itself, without its launcher)...", how);
+        if (run_program(exe, args, dir, dpi ? "HighDpiAware" : 0, &pid)) {
+            char res[24] = "";
+            if (w && mode != DISPLAY_DEFAULT) sfmt(res, sizeof res, " at %ux%u", w, h);
+            say("Starting Cry of Fear%s%s (the game itself, without its launcher)...", how, res);
+            if (dpi || raw)
+                say("  With: %s%s%s.", dpi ? "sharp picture on high-DPI screens" : "", dpi && raw ? ", " : "",
+                    raw ? "no mouse acceleration" : "");
             if (mode == DISPLAY_BORDERLESS) {
                 g_bl_pid = pid;
                 g_bl_until = now_ms() + 120000;
@@ -1053,7 +1060,7 @@ static void start_game(u64 display)
     }
     open_url("steam://run/223710");
     say("Starting Cry of Fear through Steam instead...");
-    if (mode != DISPLAY_DEFAULT) say("(The Display choice only works when CoFLink starts the game itself.)");
+    if (mode != DISPLAY_DEFAULT || dpi || raw) say("(The Settings tab only works when CoFLink starts the game itself.)");
 }
 
 /* ---------- modes ---------- */

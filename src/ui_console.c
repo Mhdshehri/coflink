@@ -80,14 +80,15 @@ bool ui_poll(Cmd *c)
     case 's': case 'S': c->kind = CMD_STATUS; break;
     case 'x': case 'X': c->kind = CMD_STOP; break;
     case 'g': case 'G': c->kind = CMD_LAUNCH; c->arg = g_display; break;
-    case 'v': case 'V': /* Display choice for G (next line: mode width height) */
+    case 'v': case 'V': /* Display choice for G (next line: mode width height switches) */
         if (read_line(line, sizeof line)) {
-            unsigned m = 0, w = 0, h = 0;
+            unsigned m = 0, w = 0, h = 0, f = 0;
             char *p = line;
             m = (unsigned)strtoul(p, &p, 10);
             w = (unsigned)strtoul(p, &p, 10);
             h = (unsigned)strtoul(p, &p, 10);
-            g_display = DISPLAY_ARG(m, w, h);
+            f = (unsigned)strtoul(p, &p, 10); /* switches: DISPLAY_DPI, DISPLAY_RAWMOUSE */
+            g_display = DISPLAY_ARG(m & 0x0F, f & 0x30, w, h);
         }
         return false;
     case 'r': case 'R': c->kind = CMD_REFRESH; break;

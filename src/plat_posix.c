@@ -123,9 +123,10 @@ void clipboard_set(const char *t) { (void)t; }
 bool process_running(const char *n) { (void)n; const char *e = getenv("MOCK_COF"); return e && *e == '1'; }
 void open_url(const char *u) { printf("[mock] would open %s\n", u); }
 bool file_exists(const char *path) { return access(path, F_OK) == 0; }
-bool run_program(const char *exe, const char *args, const char *dir, uint32_t *pid)
+bool run_program(const char *exe, const char *args, const char *dir, const char *layer, uint32_t *pid)
 {
     printf("[mock] would run %s %s (in %s)\n", exe, args, dir);
+    if (layer) printf("[mock] with compatibility setting %s\n", layer);
     *pid = 4242;
     return true;
 }

@@ -163,6 +163,10 @@ IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 enum {
     ID_HOST = 101, ID_JOIN, ID_STOP, ID_STATUS, ID_LOBBY, ID_COPYID, ID_JOINID,
     ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME, ID_TAB_HOWTO, ID_TAB_LOG, ID_COPYLOG, ID_HOWTO, ID_DISPLAY,
+    /* the Settings tab */
+    ID_TAB_SET, ID_SEC_DISP, ID_SEC_MOUSE, ID_SL_MODE, ID_MODE_GAME, ID_MODE_FULL, ID_MODE_WIN, ID_MODE_BL,
+    ID_SL_RES, ID_SET_W, ID_SL_X, ID_SET_H, ID_SET_PICK, ID_SF_RES, ID_SET_DPI, ID_SF_DPI, ID_SET_RAW, ID_SF_RAW,
+    ID_SET_NOTE, ID_SET_RESET,
     ID_LOBBYLABEL,
 };
 
@@ -273,7 +277,8 @@ static u64 g_close_ms;
 static UiPerson g_view[2][64]; /* what the list box shows (GUI thread copy) */
 static int g_nview[2];
 static int g_list_shown = -1;
-static bool g_tab_log;     /* false: "How to" is shown in the box, true: the log */
+enum { TAB_HOWTO, TAB_LOG, TAB_SET };
+static int g_tab;          /* what the box shows: "How to", the log or the Settings */
 static bool g_log_unseen;  /* a warning arrived while "How to" was shown: red dot on Log */
 
 static int S_(int v) { return v * g_dpi / 96; }
@@ -298,8 +303,9 @@ static const Theme LIGHT = { false,
 static Theme T;
 /* text boxes and the list sit inside rounded frames drawn in the theme's
    colors (Windows' own borders are black in both themes) */
-typedef struct { int id, x, y, w, h; } Frame;
-static Frame g_frames[3];
+typedef struct { int id, x, y, w, h, tab; } Frame; /* tab: only drawn on that tab (-1: always) */
+static Frame g_frames[8];
+static int g_frame_tab = -1; /* the tab the next framed() boxes belong to */
 static int g_nframes;
 static HBRUSH g_br_bg, g_br_panel, g_br_accent;
 
@@ -310,7 +316,17 @@ static void draw_frames(HDC dc)
     HANDLE ob = SelectObject(dc, b), op = SelectObject(dc, p);
     for (int i = 0; i < g_nframes; i++) {
         Frame *f = &g_frames[i];
+        if (f->tab >= 0 && f->tab != g_tab) continue;
         RoundRect(dc, S_(f->x), S_(f->y), S_(f->x + f->w), S_(f->y + f->h), S_(8), S_(8));
+    }
+    if (g_tab == TAB_SET) { /* a line under each section's title */
+        static const int ys[2] = { 414, 552 };
+        for (int i = 0; i < 2; i++) {
+            RECT l = { S_(28), S_(ys[i]), S_(572), S_(ys[i]) + 1 };
+            HBRUSH lb = CreateSolidBrush(T.border);
+            FillRect(dc, &l, lb);
+            DeleteObject(lb);
+        }
     }
     SelectObject(dc, ob);
     SelectObject(dc, op);
@@ -389,6 +405,18 @@ static void load_resolutions(void)
     }
 }
 
+/* ---------- the Settings tab: how Start Cry of Fear starts the game ---------- */
+
+static bool g_set_dpi, g_set_raw; /* the two switches */
+static bool g_set_filling;        /* the boxes are being filled in by CoFLink, not typed */
+
+static void set_ctl_text(int id, const char *t)
+{
+    WCHAR w[128];
+    SetWindowTextW(g_c[id], wide(t, w, 128));
+}
+
+/* the button by Start Cry of Fear: a short summary, opens the Settings tab */
 static void display_label(void)
 {
     static const char *names[] = { "Display: game's own", "Fullscreen", "Windowed", "Borderless" };
@@ -396,27 +424,26 @@ static void display_label(void)
     if (g_disp_mode == DISPLAY_DEFAULT) sfmt(t, sizeof t, "%s", names[0]);
     else if (g_disp_mode == DISPLAY_BORDERLESS || !g_disp_w) sfmt(t, sizeof t, "%s", names[g_disp_mode]);
     else sfmt(t, sizeof t, "%s %ux%u", names[g_disp_mode], g_disp_w, g_disp_h);
-    WCHAR w[64];
-    SetWindowTextW(g_c[ID_DISPLAY], wide(t, w, 64));
+    set_ctl_text(ID_DISPLAY, t);
 }
 
 static void save_display(void)
 {
     char t[64];
-    sfmt(t, sizeof t, "%d %u %u\n", g_disp_mode, g_disp_w, g_disp_h);
+    sfmt(t, sizeof t, "%d %u %u %d %d\n", g_disp_mode, g_disp_w, g_disp_h, g_set_dpi, g_set_raw);
     file_write_text("coflink_display.txt", t);
 }
 
 static void load_display(void)
 {
     FILE *f = fopen("coflink_display.txt", "rb");
-    if (!f) return; /* first start: the game's own setting */
+    if (!f) return; /* first start: the game's own setting, both switches off */
     char b[64] = { 0 };
     fread(b, 1, sizeof b - 1, f);
     fclose(f);
-    unsigned v[3] = { 0, 0, 0 };
+    unsigned v[5] = { 0, 0, 0, 0, 0 };
     int k = 0;
-    for (char *p = b; *p && k < 3; ) {
+    for (char *p = b; *p && k < 5; ) {
         while (*p == ' ') p++;
         if (*p < '0' || *p > '9') break;
         while (*p >= '0' && *p <= '9') { if (v[k] < 100000) v[k] = v[k] * 10 + (unsigned)(*p - '0'); p++; }
@@ -425,61 +452,101 @@ static void load_display(void)
     g_disp_mode = v[0] <= DISPLAY_BORDERLESS ? (int)v[0] : DISPLAY_DEFAULT;
     g_disp_w = v[1];
     g_disp_h = v[2];
-    if (g_disp_w < 320 || g_disp_h < 200) g_disp_w = g_disp_h = 0;
+    if (g_disp_w < 320 || g_disp_h < 200 || g_disp_w > 16384 || g_disp_h > 16384) g_disp_w = g_disp_h = 0;
+    g_set_dpi = v[3] == 1;
+    g_set_raw = v[4] == 1;
 }
 
 /* what Start Cry of Fear sends to the engine */
 static u64 display_arg(void)
 {
+    int flags = (g_set_dpi ? DISPLAY_DPI : 0) | (g_set_raw ? DISPLAY_RAWMOUSE : 0);
     if (g_disp_mode == DISPLAY_BORDERLESS) /* always the screen's own size */
-        return DISPLAY_ARG(DISPLAY_BORDERLESS, g_desktop.w, g_desktop.h);
-    return DISPLAY_ARG(g_disp_mode, g_disp_w, g_disp_h);
+        return DISPLAY_ARG(DISPLAY_BORDERLESS, flags, g_desktop.w, g_desktop.h);
+    if (g_disp_mode == DISPLAY_DEFAULT) return DISPLAY_ARG(DISPLAY_DEFAULT, flags, 0, 0);
+    return DISPLAY_ARG(g_disp_mode, flags, g_disp_w, g_disp_h);
 }
 
-static void display_menu(void)
+/* the Settings tab's controls show the current choice */
+static void show_settings(void)
 {
-    enum { M_MODE = 1, M_RES_GAME = 10, M_RES = 20 };
+    static const int modes[4] = { ID_MODE_GAME, ID_MODE_FULL, ID_MODE_WIN, ID_MODE_BL };
+    for (int i = 0; i < 4; i++) RedrawWindow(g_c[modes[i]], 0, 0, 0x1 | 0x4);
+    bool own_size = g_disp_mode == DISPLAY_FULL || g_disp_mode == DISPLAY_WINDOW;
+    char t[96];
+    g_set_filling = true;
+    if (g_disp_mode == DISPLAY_BORDERLESS) {
+        sfmt(t, sizeof t, "%u", g_desktop.w); set_ctl_text(ID_SET_W, t);
+        sfmt(t, sizeof t, "%u", g_desktop.h); set_ctl_text(ID_SET_H, t);
+    } else if (own_size && g_disp_w) {
+        sfmt(t, sizeof t, "%u", g_disp_w); set_ctl_text(ID_SET_W, t);
+        sfmt(t, sizeof t, "%u", g_disp_h); set_ctl_text(ID_SET_H, t);
+    } else {
+        set_ctl_text(ID_SET_W, "");
+        set_ctl_text(ID_SET_H, "");
+    }
+    g_set_filling = false;
+    EnableWindow(g_c[ID_SET_W], own_size);
+    EnableWindow(g_c[ID_SET_H], own_size);
+    EnableWindow(g_c[ID_SET_PICK], own_size);
+    if (g_disp_mode == DISPLAY_BORDERLESS) sfmt(t, sizeof t, "always your screen's size");
+    else if (g_disp_mode == DISPLAY_DEFAULT) sfmt(t, sizeof t, "the game's own (pick a mode to set it)");
+    else sfmt(t, sizeof t, "%s", g_disp_w ? "" : "empty = the game's own");
+    set_ctl_text(ID_SF_RES, t);
+    RedrawWindow(g_c[ID_SET_DPI], 0, 0, 0x1 | 0x4);
+    RedrawWindow(g_c[ID_SET_RAW], 0, 0, 0x1 | 0x4);
+    display_label();
+}
+
+static void settings_changed(void)
+{
+    save_display();
+    show_settings();
+}
+
+/* typed into the resolution boxes */
+static void read_size_boxes(void)
+{
+    if (g_set_filling || (g_disp_mode != DISPLAY_FULL && g_disp_mode != DISPLAY_WINDOW)) return;
+    unsigned v[2] = { 0, 0 };
+    for (int i = 0; i < 2; i++) {
+        WCHAR w[16];
+        int n = GetWindowTextW(g_c[i ? ID_SET_H : ID_SET_W], w, 16);
+        for (int k = 0; k < n; k++)
+            if (w[k] >= '0' && w[k] <= '9' && v[i] < 100000) v[i] = v[i] * 10 + (unsigned)(w[k] - '0');
+    }
+    bool ok = v[0] >= 320 && v[1] >= 200 && v[0] <= 16384 && v[1] <= 16384;
+    g_disp_w = ok ? v[0] : 0;
+    g_disp_h = ok ? v[1] : 0;
+    save_display();
+    set_ctl_text(ID_SF_RES, g_disp_w ? "" : "empty = the game's own");
+    display_label();
+}
+
+/* "Pick": the sizes the screen supports */
+static void pick_resolution(void)
+{
+    enum { M_GAME = 1, M_RES = 10 };
     load_resolutions();
     HMENU m = CreatePopupMenu();
     if (!m) return;
-    const UINT ON = 0x8 /* checked */, OFF = 0x3 /* greyed */, SEP = 0x800;
-    static const char *modes[] = { "Game's own setting", "Fullscreen", "Windowed", "Borderless (fills the screen)" };
+    const UINT ON = 0x8 /* checked */;
     WCHAR w[96];
-    AppendMenuW(m, OFF, 0, WTEXT("Mode"));
-    for (int i = 0; i < 4; i++)
-        AppendMenuW(m, g_disp_mode == i ? ON : 0, M_MODE + i, wide(modes[i], w, 96));
-    AppendMenuW(m, SEP, 0, 0);
-    bool fixed = g_disp_mode == DISPLAY_BORDERLESS || g_disp_mode == DISPLAY_DEFAULT;
-    AppendMenuW(m, OFF, 0, fixed ? (g_disp_mode == DISPLAY_BORDERLESS ? WTEXT("Resolution: your screen's") : WTEXT("Resolution: the game's own"))
-                                 : WTEXT("Resolution"));
-    if (!fixed) {
-        AppendMenuW(m, !g_disp_w ? ON : 0, M_RES_GAME, WTEXT("Game's own resolution"));
-        for (int i = 0; i < g_nres; i++) {
-            char t[40];
-            bool screen = g_res[i].w == g_desktop.w && g_res[i].h == g_desktop.h;
-            sfmt(t, sizeof t, "%u x %u%s", g_res[i].w, g_res[i].h, screen ? "  (your screen)" : "");
-            AppendMenuW(m, g_disp_w == g_res[i].w && g_disp_h == g_res[i].h ? ON : 0, M_RES + i, wide(t, w, 96));
-        }
+    AppendMenuW(m, !g_disp_w ? ON : 0, M_GAME, WTEXT("Game's own resolution"));
+    for (int i = 0; i < g_nres; i++) {
+        char t[40];
+        bool screen = g_res[i].w == g_desktop.w && g_res[i].h == g_desktop.h;
+        sfmt(t, sizeof t, "%u x %u%s", g_res[i].w, g_res[i].h, screen ? "  (your screen)" : "");
+        AppendMenuW(m, g_disp_w == g_res[i].w && g_disp_h == g_res[i].h ? ON : 0, M_RES + i, wide(t, w, 96));
     }
-    AppendMenuW(m, SEP, 0, 0);
-    AppendMenuW(m, OFF, 0, WTEXT("Used by Start Cry of Fear"));
     RECT r;
-    GetWindowRect(g_c[ID_DISPLAY], &r);
-    int id = (int)TrackPopupMenu(m, 0x100 /* return the choice */ | 0x8 /* top aligned */, r.left, r.bottom, 0, g_wnd, 0);
+    GetWindowRect(g_c[ID_SET_PICK], &r);
+    int id = (int)TrackPopupMenu(m, 0x100 /* return the choice */, r.left, r.bottom, 0, g_wnd, 0);
     DestroyMenu(m);
-    if (id >= M_MODE && id < M_MODE + 4) {
-        g_disp_mode = id - M_MODE;
-        if (g_disp_mode == DISPLAY_FULL && !g_disp_w) { g_disp_w = g_desktop.w; g_disp_h = g_desktop.h; } /* sensible start */
-    } else if (id == M_RES_GAME) {
-        g_disp_w = g_disp_h = 0;
-    } else if (id >= M_RES && id < M_RES + g_nres) {
-        g_disp_w = g_res[id - M_RES].w;
-        g_disp_h = g_res[id - M_RES].h;
-    } else {
-        return;
-    }
-    save_display();
-    display_label();
+    if (id == M_GAME) g_disp_w = g_disp_h = 0;
+    else if (id >= M_RES && id < M_RES + g_nres) { g_disp_w = g_res[id - M_RES].w; g_disp_h = g_res[id - M_RES].h; }
+    else return;
+    settings_changed();
 }
 
 static void save_theme(void) { file_write_text("coflink_theme.txt", T.dark ? "dark\n" : "light\n"); }
@@ -509,12 +576,16 @@ static void set_theme(bool dark)
 }
 
 static bool is_primary(UINT id) { return id == ID_HOST || id == ID_JOIN || id == ID_ACTION; }
-static bool is_tab(UINT id) { return id == ID_TAB_HOWTO || id == ID_TAB_LOG; }
+static bool is_tab(UINT id) { return id == ID_TAB_HOWTO || id == ID_TAB_LOG || id == ID_TAB_SET; }
+static int tab_of(UINT id) { return id == ID_TAB_LOG ? TAB_LOG : id == ID_TAB_SET ? TAB_SET : TAB_HOWTO; }
+static bool on_settings_panel(UINT id) { return id >= ID_SEC_DISP && id <= ID_SET_RESET; }
+static bool is_mode_btn(UINT id) { return id >= ID_MODE_GAME && id <= ID_MODE_BL; }
+static bool is_switch(UINT id) { return id == ID_SET_DPI || id == ID_SET_RAW; }
 
 /* "How to" / "Log": the chosen one looks like a raised tab with a red line under it */
 static void draw_tab(DrawItem *d)
 {
-    bool on = (d->id == ID_TAB_LOG) == g_tab_log;
+    bool on = tab_of(d->id) == g_tab;
     FillRect(d->dc, &d->rc, g_br_bg);
     if (on) {
         HBRUSH b = CreateSolidBrush(T.btn);
@@ -547,22 +618,67 @@ static void draw_tab(DrawItem *d)
     }
 }
 
+/* An on/off switch (as in SCCTLink): a pill, red with I when on, grey with O
+   when off, then its name. */
+static void draw_switch(DrawItem *d)
+{
+    bool off = d->state & ODS_DISABLED, focus = d->state & ODS_FOCUS;
+    bool on = (d->id == ID_SET_DPI ? g_set_dpi : g_set_raw) && !off;
+    FillRect(d->dc, &d->rc, g_br_panel);
+    int h = S_(22), w = S_(44), x = d->rc.left, y = (d->rc.top + d->rc.bottom - h) / 2;
+    DWORD fill = off ? T.dis_bg : on ? T.accent : T.btn, edge = off ? T.dis_bg : on ? T.accent : T.border;
+    HBRUSH b = CreateSolidBrush(fill);
+    HANDLE p = CreatePen(0, 1, focus && !off ? T.text : edge);
+    HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
+    RoundRect(d->dc, x, y, x + w, y + h, h, h);
+    SelectObject(d->dc, ob);
+    SelectObject(d->dc, op);
+    DeleteObject(b);
+    DeleteObject(p);
+    int k = S_(18), kx = on ? x + w - k - S_(2) : x + S_(2), ky = y + S_(2); /* the knob */
+    DWORD kc = off ? T.dis_text : on ? RGBC(255, 255, 255) : T.dim;
+    b = CreateSolidBrush(kc);
+    p = CreatePen(0, 1, kc);
+    ob = SelectObject(d->dc, b);
+    op = SelectObject(d->dc, p);
+    RoundRect(d->dc, kx, ky, kx + k, ky + k, k, k);
+    SelectObject(d->dc, ob);
+    SelectObject(d->dc, op);
+    DeleteObject(b);
+    DeleteObject(p);
+    SetBkMode(d->dc, TRANSPARENT_BK);
+    HANDLE of = SelectObject(d->dc, g_bold);
+    SetTextColor(d->dc, on ? RGBC(255, 255, 255) : off ? T.dis_text : T.dim);
+    RECT ir = { on ? x + S_(8) : x + w - S_(18), y, on ? x + S_(18) : x + w - S_(6), y + h };
+    DrawTextW(d->dc, on ? WTEXT("I") : WTEXT("O"), 1, &ir, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(d->dc, g_font);
+    WCHAR t[64];
+    int n = GetWindowTextW(d->hwnd, t, 64);
+    SetTextColor(d->dc, off ? T.dis_text : T.text);
+    RECT tr = { x + w + S_(10), d->rc.top, d->rc.right, d->rc.bottom };
+    DrawTextW(d->dc, t, n, &tr, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    SelectObject(d->dc, of);
+}
+
 static void draw_button(DrawItem *d)
 {
     if (is_tab(d->id)) { draw_tab(d); return; }
+    if (is_switch(d->id)) { draw_switch(d); return; }
     bool down = d->state & ODS_SELECTED, off = d->state & ODS_DISABLED, focus = d->state & ODS_FOCUS;
+    /* the chosen display mode looks like a red (primary) button */
+    bool primary = is_primary(d->id) || (is_mode_btn(d->id) && (int)(d->id - ID_MODE_GAME) == g_disp_mode);
     DWORD fill, text, edge;
     if (off) { fill = T.dis_bg; text = T.dis_text; edge = T.dis_bg; }
-    else if (is_primary(d->id)) { fill = down ? T.accent_down : T.accent; text = T.sel_text; edge = fill; }
+    else if (primary) { fill = down ? T.accent_down : T.accent; text = T.sel_text; edge = fill; }
     else { fill = down ? T.btn_down : T.btn; text = T.text; edge = T.border; }
-    FillRect(d->dc, &d->rc, g_br_bg);
+    FillRect(d->dc, &d->rc, on_settings_panel(d->id) ? g_br_panel : g_br_bg);
     HBRUSH b = CreateSolidBrush(fill);
     HANDLE p = CreatePen(0, 1, edge);
     HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
     int r = S_(10);
     RoundRect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, r, r);
     if (focus && !off) { /* keyboard focus ring */
-        HANDLE fp = CreatePen(0, 1, is_primary(d->id) ? T.sel_text : T.dim);
+        HANDLE fp = CreatePen(0, 1, primary ? T.sel_text : T.dim);
         SelectObject(d->dc, fp);
         SelectObject(d->dc, GetStockObject(NULL_BRUSH));
         int k = S_(3);
@@ -576,7 +692,7 @@ static void draw_button(DrawItem *d)
     DeleteObject(p);
     WCHAR w[64];
     int n = GetWindowTextW(d->hwnd, w, 64);
-    HANDLE of = SelectObject(d->dc, is_primary(d->id) ? g_bold : g_font);
+    HANDLE of = SelectObject(d->dc, primary ? g_bold : g_font);
     SetBkMode(d->dc, TRANSPARENT_BK);
     SetTextColor(d->dc, text);
     RECT tr = d->rc;
@@ -606,8 +722,15 @@ static void draw_list_item(DrawItem *d)
 static LRESULT control_colors(UINT msg, HDC dc, HWND ctl_)
 {
     if (ctl_ == g_c[ID_ACCENT]) return (LRESULT)g_br_accent;
-    bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY] || ctl_ == g_c[ID_HOWTO];
-    SetTextColor(dc, (ctl_ == g_c[ID_LISTLABEL] || ctl_ == g_c[ID_LOBBYLABEL]) ? T.dim : T.text);
+    bool panel_label = false, dim_label = false;
+    for (int id = ID_SEC_DISP; id <= ID_SET_RESET; id++)
+        if (ctl_ == g_c[id]) {
+            panel_label = true;
+            dim_label = id == ID_SEC_DISP || id == ID_SEC_MOUSE || id == ID_SF_RES || id == ID_SF_DPI ||
+                        id == ID_SF_RAW || id == ID_SET_NOTE;
+        }
+    bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY] || ctl_ == g_c[ID_HOWTO] || panel_label;
+    SetTextColor(dc, (ctl_ == g_c[ID_LISTLABEL] || ctl_ == g_c[ID_LOBBYLABEL] || dim_label) ? T.dim : T.text);
     SetBkColor(dc, box ? T.panel : T.bg);
     return (LRESULT)(box ? g_br_panel : g_br_bg);
 }
@@ -649,7 +772,7 @@ static HWND ctl(int id, const WCHAR *cls, const WCHAR *text, DWORD style, DWORD 
 /* a box (text box or list) inside a drawn frame; ix/iy = space inside the frame */
 static void framed(int id, const WCHAR *cls, DWORD style, int x, int y, int w, int h, int ix, int iy)
 {
-    if (g_nframes < 3) g_frames[g_nframes++] = (Frame){ id, x, y, w, h };
+    if (g_nframes < 8) g_frames[g_nframes++] = (Frame){ id, x, y, w, h, g_frame_tab };
     ctl(id, cls, WTEXT(""), style, 0, x + ix, y + iy, w - 2 * ix, h - 2 * iy, g_font);
 }
 
@@ -675,13 +798,39 @@ static void build(void)
     ctl(ID_REFRESH, B, WTEXT("Refresh"), OD, 0, 452, 230, 134, 30, g_font);
     ctl(ID_LAUNCH, B, WTEXT("Start Cry of Fear"), OD, 0, 14, 312, 180, 30, g_font);
     ctl(ID_COPYCONN, B, WTEXT("Copy connect command"), OD, 0, 204, 312, 200, 30, g_font);
-    ctl(ID_DISPLAY, B, WTEXT("Display"), OD, 0, 410, 312, 176, 30, g_font);
+    ctl(ID_DISPLAY, B, WTEXT("Display"), OD, 0, 410, 312, 176, 30, g_font); /* opens Settings */
     ctl(ID_TAB_HOWTO, B, WTEXT("How to"), OD, 0, 14, 350, 96, 28, g_font);
     ctl(ID_TAB_LOG, B, WTEXT("Log"), OD, 0, 114, 350, 80, 28, g_font);
+    ctl(ID_TAB_SET, B, WTEXT("Settings"), OD, 0, 198, 350, 96, 28, g_font);
     ctl(ID_COPYLOG, B, WTEXT("Copy log"), OD, 0, 486, 350, 100, 26, g_font);
-    /* one box: "How to" and the log take turns in it */
-    framed(ID_LOG, E, WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 14, 384, 572, 180, 7, 5);
-    ctl(ID_HOWTO, E, WTEXT(""), WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 14 + 7, 384 + 5, 572 - 14, 180 - 10, g_font);
+    /* one box: "How to", the log and the Settings take turns in it */
+    framed(ID_LOG, E, WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 14, 384, 572, 250, 7, 5);
+    ctl(ID_HOWTO, E, WTEXT(""), WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 14 + 7, 384 + 5, 572 - 14, 250 - 10, g_font);
+    /* Settings: DISPLAY (mode, resolution, sharp picture) and MOUSE */
+    const DWORD NUM = WS_TABSTOP | ES_AUTOHSCROLL | 0x2000 /* ES_NUMBER */, ELL = 0x4000 /* SS_ENDELLIPSIS */;
+    ctl(ID_SEC_DISP, T_, WTEXT("DISPLAY"), 0, 0, 28, 396, 300, 16, g_font);
+    ctl(ID_SL_MODE, T_, WTEXT("Mode"), ELL, 0, 28, 428, 88, 18, g_font);
+    ctl(ID_MODE_GAME, B, WTEXT("Game's own"), OD, 0, 120, 424, 108, 26, g_font);
+    ctl(ID_MODE_FULL, B, WTEXT("Fullscreen"), OD, 0, 232, 424, 108, 26, g_font);
+    ctl(ID_MODE_WIN, B, WTEXT("Windowed"), OD, 0, 344, 424, 108, 26, g_font);
+    ctl(ID_MODE_BL, B, WTEXT("Borderless"), OD, 0, 456, 424, 108, 26, g_font);
+    ctl(ID_SL_RES, T_, WTEXT("Resolution"), ELL, 0, 28, 464, 88, 18, g_font);
+    g_frame_tab = TAB_SET;
+    framed(ID_SET_W, E, NUM, 120, 460, 64, 26, 7, 5);
+    ctl(ID_SL_X, T_, WTEXT("x"), 0, 0, 190, 464, 12, 18, g_font);
+    framed(ID_SET_H, E, NUM, 204, 460, 64, 26, 7, 5);
+    g_frame_tab = -1;
+    ctl(ID_SET_PICK, B, WTEXT("Pick..."), OD, 0, 276, 460, 76, 26, g_font);
+    ctl(ID_SF_RES, T_, WTEXT(""), ELL, 0, 360, 464, 212, 18, g_font);
+    ctl(ID_SET_DPI, B, WTEXT("Sharp picture"), OD, 0, 28, 494, 200, 26, g_font);
+    ctl(ID_SF_DPI, T_, WTEXT("for a blurry or cut-off picture (Windows zoom 125%+)"),
+        ELL, 0, 236, 498, 336, 18, g_font);
+    ctl(ID_SEC_MOUSE, T_, WTEXT("MOUSE"), 0, 0, 28, 534, 300, 16, g_font);
+    ctl(ID_SET_RAW, B, WTEXT("No mouse acceleration"), OD, 0, 28, 560, 200, 26, g_font);
+    ctl(ID_SF_RAW, T_, WTEXT("raw mouse: the game ignores Windows' acceleration"), ELL, 0, 236, 564, 336, 18, g_font);
+    ctl(ID_SET_NOTE, T_, WTEXT("Used by Start Cry of Fear (not when started from Steam)."),
+        ELL, 0, 28, 604, 400, 18, g_font);
+    ctl(ID_SET_RESET, B, WTEXT("Reset to defaults"), OD, 0, 436, 600, 136, 24, g_font);
     SendMessageW(g_c[ID_LOG], EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
 }
 
@@ -766,19 +915,21 @@ static void build_howto(const UiState *s, char *o, int n)
             "Before your first game, both of you: Steam -> right-click Cry of Fear -> Properties\r\n"
             "-> Installed Files -> Verify integrity of game files.\r\n\r\n"
             "In the steps, [x] = done and [>] = what to do now.\r\n"
+            "Settings: fullscreen, windowed or borderless, resolution, a sharp picture, no mouse acceleration.\r\n"
             "Everything CoFLink does is in the Log (red dot = something needs a look).");
     }
 }
 
-static void show_tab(bool log)
+static void show_tab(int tab)
 {
-    g_tab_log = log;
-    if (log) g_log_unseen = false;
-    ShowWindow(g_c[ID_LOG], log ? 5 : 0);
-    ShowWindow(g_c[ID_HOWTO], log ? 0 : 5);
-    ShowWindow(g_c[ID_COPYLOG], log ? 5 : 0);
-    RedrawWindow(g_c[ID_TAB_HOWTO], 0, 0, 0x1 | 0x4);
-    RedrawWindow(g_c[ID_TAB_LOG], 0, 0, 0x1 | 0x4);
+    g_tab = tab;
+    if (tab == TAB_LOG) g_log_unseen = false;
+    ShowWindow(g_c[ID_LOG], tab == TAB_LOG ? 5 : 0);
+    ShowWindow(g_c[ID_HOWTO], tab == TAB_HOWTO ? 5 : 0);
+    ShowWindow(g_c[ID_COPYLOG], tab == TAB_LOG ? 5 : 0);
+    for (int id = ID_SEC_DISP; id <= ID_SET_RESET; id++) ShowWindow(g_c[id], tab == TAB_SET ? 5 : 0);
+    if (tab == TAB_SET) show_settings();
+    RedrawWindow(g_wnd, 0, 0, 0x1 | 0x4 | 0x80); /* the box's frames and lines differ per tab */
 }
 
 static void update_howto(void)
@@ -862,7 +1013,7 @@ static void on_timer(void)
     LeaveCriticalSection(&g_cs);
 
     if (n) { pend[n] = 0; append_log(pend); }
-    if (warned && !g_tab_log && !g_log_unseen) { /* red dot on "Log" */
+    if (warned && g_tab != TAB_LOG && !g_log_unseen) { /* red dot on "Log" */
         g_log_unseen = true;
         RedrawWindow(g_c[ID_TAB_LOG], 0, 0, 0x1 | 0x4);
     }
@@ -956,10 +1107,28 @@ static void on_command(int id, int code)
             on_command(ID_JOINID, 0);
         break;
     case ID_LAUNCH: push_cmd(CMD_LAUNCH, display_arg()); break;
-    case ID_DISPLAY: display_menu(); break;
+    case ID_DISPLAY: show_tab(TAB_SET); break;
+    case ID_MODE_GAME: case ID_MODE_FULL: case ID_MODE_WIN: case ID_MODE_BL:
+        g_disp_mode = id - ID_MODE_GAME;
+        if (g_disp_mode == DISPLAY_FULL && !g_disp_w) { g_disp_w = g_desktop.w; g_disp_h = g_desktop.h; }
+        settings_changed();
+        break;
+    case ID_SET_W: case ID_SET_H:
+        if (code == 0x300 /* EN_CHANGE */) read_size_boxes();
+        break;
+    case ID_SET_PICK: pick_resolution(); break;
+    case ID_SET_DPI: g_set_dpi = !g_set_dpi; settings_changed(); break;
+    case ID_SET_RAW: g_set_raw = !g_set_raw; settings_changed(); break;
+    case ID_SET_RESET:
+        g_disp_mode = DISPLAY_DEFAULT;
+        g_disp_w = g_disp_h = 0;
+        g_set_dpi = g_set_raw = false;
+        settings_changed();
+        break;
     case ID_REFRESH: push_cmd(CMD_REFRESH, 0); break;
-    case ID_TAB_HOWTO: show_tab(false); break;
-    case ID_TAB_LOG: show_tab(true); break;
+    case ID_TAB_HOWTO: show_tab(TAB_HOWTO); break;
+    case ID_TAB_LOG: show_tab(TAB_LOG); break;
+    case ID_TAB_SET: show_tab(TAB_SET); break;
     case ID_COPYLOG:
         copy_log();
         ui_log("(Log copied. Paste it with Ctrl+V.)");
@@ -1067,7 +1236,7 @@ int main(int argc, char **argv)
     RegisterClassExW(&wc);
 
     DWORD style = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    RECT r = { 0, 0, S_(600), S_(578) };
+    RECT r = { 0, 0, S_(600), S_(648) };
     AdjustWindowRectEx(&r, style, 0, 0);
     int ww = r.right - r.left, wh = r.bottom - r.top;
     int x = (GetSystemMetrics(0) - ww) / 2, y = (GetSystemMetrics(1) - wh) / 2;
@@ -1079,7 +1248,7 @@ int main(int argc, char **argv)
     load_resolutions();
     display_label();
     set_theme(T.dark); /* button label, title bar, scrollbars */
-    show_tab(false); /* start on "How to" */
+    show_tab(TAB_HOWTO); /* start on "How to" */
     on_timer();
     ShowWindow(g_wnd, 1);
     UpdateWindow(g_wnd);

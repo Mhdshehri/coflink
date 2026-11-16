@@ -575,8 +575,22 @@ def main():
         out = launch_log({"MOCK_COF_DIR": g1}, "1 5 99999")
         check(f"cof.exe {opts} -full (in" in out, "a nonsense size is ignored (the game's own resolution)")
         out = launch_log({}, "3 1920 1080")
-        check("would open steam://run/223710" in out and "only works when CoFLink starts the game itself" in out,
-              "started through Steam instead: says the Display choice can't apply")
+        check("would open steam://run/223710" in out and "Settings tab only works when CoFLink starts the game itself" in out,
+              "started through Steam instead: says the Settings can't apply")
+        out = launch_log({"MOCK_COF_DIR": g1}, "0 0 0 16")
+        check(f"cof.exe {opts} (in" in out and "[mock] with compatibility setting HighDpiAware" in out
+              and "sharp picture on high-DPI screens" in out,
+              "Sharp picture: the game starts with Windows' high-DPI setting, its options unchanged")
+        out = launch_log({"MOCK_COF_DIR": g1}, "0 0 0 32")
+        check(f"cof.exe {opts} -noforcemaccel -noforcemparms -noforcemspd +m_rawinput 1 (in" in out
+              and "compatibility setting" not in out and "no mouse acceleration" in out,
+              "No mouse acceleration: raw mouse and Windows' mouse settings left alone")
+        out = launch_log({"MOCK_COF_DIR": g1}, "1 1600 900 48")
+        check(f"cof.exe {opts} -full -w 1600 -h 900 -noforcemaccel -noforcemparms -noforcemspd +m_rawinput 1 (in" in out
+              and "HighDpiAware" in out, "both switches together with fullscreen at a resolution")
+        out = launch_log({"MOCK_COF_DIR": g1}, "0 0 0 0")
+        check(f"cof.exe {opts} (in" in out and "compatibility setting" not in out and "With:" not in out,
+              "all off: the game starts exactly as before")
 
         print("[21] Refresh: see right away when a friend starts hosting")
         e = dict(os.environ, **base, MOCK_ID="1142", MOCK_FRIENDS="1141", ASAN_OPTIONS="detect_leaks=0")

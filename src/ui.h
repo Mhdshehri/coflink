@@ -20,10 +20,13 @@ typedef enum {
 
 typedef struct { CmdKind kind; u64 arg; } Cmd;
 
-/* "Display" choice for Start Cry of Fear, packed into CMD_LAUNCH's arg:
-   mode in bits 0-7, width in bits 8-31, height in bits 32-55 (0 = game's own) */
+/* The Settings tab's choices for Start Cry of Fear, packed into CMD_LAUNCH's
+   arg: mode in bits 0-3, switches in bits 4-7, width in bits 8-31, height in
+   bits 32-55 (0 = the game's own) */
 enum { DISPLAY_DEFAULT = 0, DISPLAY_FULL = 1, DISPLAY_WINDOW = 2, DISPLAY_BORDERLESS = 3 };
-#define DISPLAY_ARG(mode, w, h) ((u64)(mode) | ((u64)(w) << 8) | ((u64)(h) << 32))
+#define DISPLAY_DPI 0x10      /* sharp picture on high-DPI screens */
+#define DISPLAY_RAWMOUSE 0x20 /* no mouse acceleration */
+#define DISPLAY_ARG(mode, flags, w, h) ((u64)(mode) | (u64)(flags) | ((u64)(w) << 8) | ((u64)(h) << 32))
 
 enum { MODE_IDLE = 0, MODE_HOST = 1, MODE_JOIN = 2 };
 

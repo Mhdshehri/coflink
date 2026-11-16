@@ -27,6 +27,8 @@ IMP BOOL WINAPI Process32First(HANDLE snap, void *entry);
 IMP BOOL WINAPI Process32Next(HANDLE snap, void *entry);
 IMP BOOL WINAPI CloseHandle(HANDLE h);
 IMP DWORD WINAPI GetFileAttributesA(const char *path);
+IMP BOOL WINAPI SetEnvironmentVariableA(const char *name, const char *value);
+IMP DWORD WINAPI GetEnvironmentVariableA(const char *name, char *buf, DWORD n);
 IMP int WINAPI MultiByteToWideChar(UINT cp, DWORD flags, const char *s, int n, void *w, int wn);
 typedef struct { DWORD cb; char *reserved, *desktop, *title; DWORD x, y, w, h, cx, cy, fill, flags;
                  uint16_t show, reserved2; void *reserved3; HANDLE in, out, err; } StartupInfoA; /* 68 bytes */
@@ -221,7 +223,46 @@ bool file_exists(const char *path)
     return a != 0xFFFFFFFFu && !(a & 0x10 /* directory */);
 }
 
-bool run_program(const char *exe, const char *args, const char *dir, uint32_t *pid)
+/* The compatibility settings Windows already keeps for this exe (Properties ->
+   Compatibility), from HKCU then HKLM, as one list; DPI ones are left out
+   (the caller adds its own). Kept so starting the game with a setting of
+   CoFLink's doesn't drop one the player chose (like "Windows 7" mode). */
+static void saved_layers(const char *exe, char *out, int n)
+{
+    char path[700];
+    int i = 0;
+    for (; exe[i] && i < (int)sizeof path - 1; i++) path[i] = exe[i] == '/' ? '\\' : exe[i];
+    path[i] = 0;
+    out[0] = 0;
+    int o = 0;
+    static const uintptr_t roots[2] = { 0x80000001u /* HKCU */, 0x80000002u /* HKLM */ };
+    for (int r = 0; r < 2; r++) {
+        char v[512];
+        DWORD size = sizeof v;
+        if (RegGetValueA((void *)roots[r], "Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers",
+                         path, 2 /* RRF_RT_REG_SZ */, 0, v, &size) != 0)
+            continue;
+        v[sizeof v - 1] = 0;
+        for (char *t = v; *t; ) { /* each word */
+            while (*t == ' ') t++;
+            char *e = t;
+            while (*e && *e != ' ') e++;
+            int len = (int)(e - t);
+            char word[64];
+            if (len > 0 && len < (int)sizeof word) {
+                memcpy(word, t, (size_t)len);
+                word[len] = 0;
+                for (int k = 0; k < len; k++) if (word[k] >= 'a' && word[k] <= 'z') word[k] = (char)(word[k] - 32);
+                bool skip = !strcmp(word, "~") || !strcmp(word, "HIGHDPIAWARE") || !strcmp(word, "DPIUNAWARE") ||
+                            !strcmp(word, "GDIDPISCALING") || strstr(out, word);
+                if (!skip && o + len + 2 < n) { if (o) out[o++] = ' '; memcpy(out + o, word, (size_t)len); o += len; out[o] = 0; }
+            }
+            t = e;
+        }
+    }
+}
+
+bool run_program(const char *exe, const char *args, const char *dir, const char *layer, uint32_t *pid)
 {
     static char cmd[1400];
     sfmt(cmd, sizeof cmd, "\"%s\" %s", exe, args);
@@ -230,7 +271,21 @@ bool run_program(const char *exe, const char *args, const char *dir, uint32_t *p
     si.cb = sizeof si;
     ProcInfo pi;
     memset(&pi, 0, sizeof pi);
-    if (!CreateProcessA(exe, cmd, 0, 0, 0, 0, 0, dir, &si, &pi)) return false;
+    /* A compatibility setting just for this start: the __COMPAT_LAYER
+       environment variable, which the new process takes from CoFLink. Nothing
+       is written to the registry. */
+    static char old[600], layers[600];
+    bool had_old = false;
+    if (layer) {
+        had_old = GetEnvironmentVariableA("__COMPAT_LAYER", old, sizeof old) > 0;
+        saved_layers(exe, layers, sizeof layers);
+        size_t n = strlen(layers);
+        sfmt(layers + n, (int)(sizeof layers - n), "%s%s", n ? " " : "", layer);
+        SetEnvironmentVariableA("__COMPAT_LAYER", layers);
+    }
+    BOOL ok = CreateProcessA(exe, cmd, 0, 0, 0, 0, 0, dir, &si, &pi);
+    if (layer) SetEnvironmentVariableA("__COMPAT_LAYER", had_old ? old : 0);
+    if (!ok) return false;
     *pid = (uint32_t)pi.pid;
     CloseHandle(pi.thread);
     CloseHandle(pi.process);

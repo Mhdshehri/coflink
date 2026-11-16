@@ -18,7 +18,7 @@ mkdef kernel32 Sleep@4 GetTickCount64@0 GetModuleFileNameA@12 SetCurrentDirector
     CreateThread@24 WaitForSingleObject@8 InitializeCriticalSection@4 EnterCriticalSection@4 \
     LeaveCriticalSection@4 MultiByteToWideChar@24 WideCharToMultiByte@32 GetModuleHandleW@4 \
     CreateToolhelp32Snapshot@8 Process32First@8 Process32Next@8 CloseHandle@4 \
-    GetFileAttributesA@4 CreateProcessA@40 GlobalFree@4
+    GetFileAttributesA@4 CreateProcessA@40 GlobalFree@4 SetEnvironmentVariableA@8 GetEnvironmentVariableA@12
 mkdef advapi32 RegGetValueA@28
 mkdef user32 OpenClipboard@4 EmptyClipboard@0 SetClipboardData@8 CloseClipboard@0 \
     RegisterClassExW@4 CreateWindowExW@48 DefWindowProcW@16 GetMessageW@16 TranslateMessage@4 \
