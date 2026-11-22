@@ -18,16 +18,16 @@ CoFLink carries Cry of Fear's LAN co-op through Steam's relay network, so you ca
 Both players unzip the [latest release](../../releases/latest) and open **CoFLink.exe**. Steam must be running, and the host must be your Steam friend. Up to 4 players.
 
 **Host**
-1. Click **Host a game**.
+1. On **Play**, pick **Host a game** and click **Host**.
 2. Click **Start Cry of Fear**, create a co-op game and choose **LAN**.
 3. Keep CoFLink open while you play.
 
 **Friend**
-1. Click **Join a friend**, pick the host and click **Join** (or paste their lobby code).
+1. On **Play**, pick **Join a friend** and click **Join**. Then pick the host and click **Join** (or paste their lobby code).
 2. When the host's game is up, click **Start Cry of Fear**.
 3. In the main menu press `~`, then `Ctrl+V` and `Enter`. The connect command is already copied.
 
-The **Settings** tab picks fullscreen, windowed or borderless, the resolution, a sharp picture on zoomed (high-DPI) screens, and no mouse acceleration. The **How to** tab in CoFLink walks you through each step. The full guide is [in the zip](package/README.txt).
+The **Settings** page picks fullscreen, windowed or borderless, the resolution, a sharp picture on zoomed (high-DPI) screens, and no mouse acceleration. **How to** in CoFLink walks you through each step. The full guide is [in the zip](package/README.txt).
 
 ## Safety
 

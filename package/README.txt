@@ -1,9 +1,9 @@
-CoFLink 1.2.1 - Cry of Fear co-op with a Steam friend
+CoFLink 1.3 - Cry of Fear co-op with a Steam friend
 =====================================================
 No VPN (no Hamachi/Radmin), no port forwarding, no IP addresses.
 One program for both players: open CoFLink.exe and click a button.
-Dark mode by default - the button at the top right switches to light.
-The box at the bottom has two buttons: "How to" shows your steps right now
+The pages are on the left: Play, Settings and Log; "How to" and the
+theme (dark by default) at the bottom. "How to" shows your steps right now
 ([x] = done, [>] = do this now), "Log" shows everything that happened
 (a red dot on Log = something needs a look; "Copy log" copies it all).
 
@@ -11,7 +11,7 @@ Both of you need: Windows, Steam running and logged in, Cry of Fear
 installed from Steam, and this whole folder (unzip it anywhere, e.g. Desktop).
 Keep CoFLink.exe and steam_api.dll together in the same folder.
 You must be Steam friends with the host. Up to 4 players (host + 3).
-Use the same CoFLink version, the latest (1.2.1).
+Use the same CoFLink version, the latest (1.3).
 
 Before the first game, both of you: in Steam, right-click Cry of Fear ->
 Properties -> Installed Files -> "Verify integrity of game files".
@@ -20,7 +20,7 @@ Same game files on both PCs = no "different version" errors or desync.
 
 HOST (the person whose game everyone joins)
 -------------------------------------------
-1. Open CoFLink.exe and click "Host a game".
+1. Open CoFLink.exe. On Play, pick "Host a game" and click "Host".
    The status line says "Hosting - waiting for friends to join".
 2. Click "Start Cry of Fear" (starts the game itself, skipping the
    launcher), then start a Co-op game and choose LAN.
@@ -28,7 +28,8 @@ HOST (the person whose game everyone joins)
 3. Your friend clicks "Join a friend" in their CoFLink - you show up in
    their list. If not, click "Copy code" and send them the short lobby
    code (like 1MCE-2B2) in Steam chat. Friends who are linked show up in your list.
-4. Keep CoFLink open while you play. Click Stop (or close it) when done.
+4. Keep CoFLink open while you play. Click Stop (the button that said
+   "Host"), or close CoFLink, when done.
    When a friend links, CoFLink flashes in the taskbar and plays a short
    sound (only if its window isn't in front).
    Kick: pick a friend in the list and click "Kick". They are cut off and
@@ -38,10 +39,10 @@ HOST (the person whose game everyone joins)
 FRIEND (joining)
 ----------------
 CoFLink only LINKS you to the host. You join the game yourself.
-1. Open CoFLink.exe and click "Join a friend". Pick the host under
-   "Friends hosting" and click Join (or paste the lobby code the host sent
-   you, like 1MCE-2B2, and click "Join this code").
-   Host not in the list yet? Click "Refresh" after they click "Host a game".
+1. Open CoFLink.exe. On Play, pick "Join a friend" and click "Join".
+   Pick the host under "Friends hosting" and click Join (or paste the lobby
+   code the host sent you, like 1MCE-2B2, and click "Join this code").
+   Host not in the list yet? Click "Refresh" after they start hosting.
    Steam invites and Steam's "Join Game" button are not used - ignore them.
 2. Wait for "...co-op game is up" in the log (CoFLink flashes in the
    taskbar and plays a short sound when it is).
@@ -55,10 +56,9 @@ CoFLink only LINKS you to the host. You join the game yourself.
 5. Keep CoFLink open while you play.
 
 
-SETTINGS TAB (display and mouse)
---------------------------------
-Click "Settings" (next to How to and Log), or the button right of
-"Copy connect command". Your choices are remembered.
+SETTINGS (display and mouse)
+----------------------------
+Click "Settings" on the left. Your choices are remembered.
 - Mode: Game's own (as before), Fullscreen, Windowed, or Borderless (a
   window the size of your screen with no frame, so alt-tab is instant;
   CoFLink starts the game in a window and takes the frame off).
