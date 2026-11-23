@@ -80,6 +80,14 @@ IMP DWORD WINAPI SetTextColor(HDC dc, DWORD c);
 IMP DWORD WINAPI SetBkColor(HDC dc, DWORD c);
 IMP int WINAPI SetBkMode(HDC dc, int mode);
 IMP BOOL WINAPI RoundRect(HDC dc, int l, int t, int r, int b, int w, int h);
+IMP HDC WINAPI CreateCompatibleDC(HDC dc);
+IMP HANDLE WINAPI CreateCompatibleBitmap(HDC dc, int w, int h);
+IMP BOOL WINAPI DeleteDC(HDC dc);
+IMP BOOL WINAPI StretchBlt(HDC d, int x, int y, int w, int h, HDC s, int sx, int sy, int sw, int sh, DWORD rop);
+IMP int WINAPI SetStretchBltMode(HDC dc, int mode);
+IMP BOOL WINAPI SetBrushOrgEx(HDC dc, int x, int y, void *old);
+IMP HANDLE WINAPI GetCurrentObject(HDC dc, UINT type);
+IMP int WINAPI GetObjectW(HANDLE obj, int n, void *out);
 IMP int WINAPI FillRect(HDC dc, const RECT *r, HBRUSH b);
 IMP int WINAPI DrawTextW(HDC dc, const WCHAR *t, int n, RECT *r, UINT fmt);
 IMP BOOL WINAPI GetClientRect(HWND w, RECT *r);
@@ -349,6 +357,78 @@ static Frame g_frames[8];
 static int g_nframes;
 static HBRUSH g_br_bg, g_br_panel, g_br_accent, g_br_border, g_br_side, g_br_field;
 
+/* ---------- smooth round shapes ----------
+   Windows' RoundRect has no anti-aliasing: small round shapes (switches, dots,
+   button corners) come out as visible steps. So a part of the shape is drawn
+   AA times bigger in memory, on a copy of what is under it, then shrunk back
+   with HALFTONE, which blends the edge pixels. GDI only (gdi32). */
+#define AA 4
+typedef struct { HDC m; HANDLE bmp, old; int x, y, w, h; } AaPart;
+
+/* Draws the shape l,t,r,b (with dc's pen and brush) into a memory copy of the
+   area x,y,w,h, AA times bigger. False: no memory, nothing done. */
+static bool aa_begin(AaPart *a, HDC dc, int x, int y, int w, int h, int l, int t, int r, int b, int rw, int rh)
+{
+    a->m = CreateCompatibleDC(dc);
+    a->bmp = a->m ? CreateCompatibleBitmap(dc, w * AA, h * AA) : 0;
+    if (!a->bmp) {
+        if (a->m) DeleteDC(a->m);
+        return false;
+    }
+    a->old = SelectObject(a->m, a->bmp);
+    a->x = x; a->y = y; a->w = w; a->h = h;
+    SetStretchBltMode(a->m, 3 /* COLORONCOLOR */);
+    StretchBlt(a->m, 0, 0, w * AA, h * AA, dc, x, y, w, h, 0x00CC0020 /* SRCCOPY */);
+    struct { UINT style; long wx, wy; DWORD color; } lp; /* LOGPEN */
+    memset(&lp, 0, sizeof lp);
+    HANDLE pen = 0;
+    if (GetObjectW(GetCurrentObject(dc, 1 /* OBJ_PEN */), sizeof lp, &lp) == (int)sizeof lp && lp.style != 5 /* PS_NULL */)
+        pen = CreatePen(6 /* PS_INSIDEFRAME: the line stays inside the shape, as at 1:1 */, (lp.wx > 0 ? lp.wx : 1) * AA, lp.color);
+    HANDLE op = SelectObject(a->m, pen ? pen : GetStockObject(8 /* NULL_PEN */));
+    HANDLE ob = SelectObject(a->m, GetCurrentObject(dc, 2 /* OBJ_BRUSH */));
+    RoundRect(a->m, (l - x) * AA, (t - y) * AA, (r - x) * AA, (b - y) * AA, rw * AA, rh * AA);
+    SelectObject(a->m, op);
+    SelectObject(a->m, ob);
+    if (pen) DeleteObject(pen);
+    return true;
+}
+
+/* Shrinks the part back onto dc, smoothly, and frees it. */
+static void aa_end(AaPart *a, HDC dc)
+{
+    int mode = SetStretchBltMode(dc, 4 /* HALFTONE */);
+    SetBrushOrgEx(dc, 0, 0, 0); /* HALFTONE needs it */
+    StretchBlt(dc, a->x, a->y, a->w, a->h, a->m, 0, 0, a->w * AA, a->h * AA, 0x00CC0020 /* SRCCOPY */);
+    if (mode) SetStretchBltMode(dc, mode);
+    SelectObject(a->m, a->old);
+    DeleteObject(a->bmp);
+    DeleteDC(a->m);
+}
+
+/* RoundRect, smooth: a small shape is drawn whole that way; a big one (a card)
+   normally, then its four corners smooth (its straight sides need nothing). */
+static void smooth_round_rect(HDC dc, int l, int t, int r, int b, int rw, int rh)
+{
+    int w = r - l, h = b - t;
+    if (w <= 0 || h <= 0) return;
+    AaPart a;
+    if ((long)w * h <= 25000) {
+        if (aa_begin(&a, dc, l, t, w, h, l, t, r, b, rw, rh)) aa_end(&a, dc);
+        else RoundRect(dc, l, t, r, b, rw, rh);
+        return;
+    }
+    int cw = rw / 2 + 2, ch = rh / 2 + 2;
+    if (cw > w / 2) cw = w / 2;
+    if (ch > h / 2) ch = h / 2;
+    const int xs[4] = { l, r - cw, l, r - cw }, ys[4] = { t, t, b - ch, b - ch };
+    AaPart c[4];
+    bool ok[4];
+    for (int i = 0; i < 4; i++) ok[i] = aa_begin(&c[i], dc, xs[i], ys[i], cw, ch, l, t, r, b, rw, rh);
+    RoundRect(dc, l, t, r, b, rw, rh);
+    for (int i = 0; i < 4; i++)
+        if (ok[i]) aa_end(&c[i], dc);
+}
+
 static void draw_frames(HDC dc)
 {
     HANDLE p = CreatePen(0, 1, T.border);
@@ -356,7 +436,7 @@ static void draw_frames(HDC dc)
     for (int i = 0; i < g_nframes; i++) {
         Frame *f = &g_frames[i];
         if (!IsWindowVisible(g_c[f->id])) continue;
-        RoundRect(dc, S_(f->x), S_(f->y), S_(f->x + f->w), S_(f->y + f->h), S_(8), S_(8));
+        smooth_round_rect(dc, S_(f->x), S_(f->y), S_(f->x + f->w), S_(f->y + f->h), S_(8), S_(8));
     }
     SelectObject(dc, ob);
     SelectObject(dc, op);
@@ -369,7 +449,7 @@ static void rbox(HDC dc, int x, int y, int w, int h, int r, DWORD fill, DWORD ed
     HBRUSH b = CreateSolidBrush(fill);
     HANDLE p = CreatePen(0, 1, edge);
     HANDLE ob = SelectObject(dc, b), op = SelectObject(dc, p);
-    RoundRect(dc, S_(x), S_(y), S_(x + w), S_(y + h), S_(r), S_(r));
+    smooth_round_rect(dc, S_(x), S_(y), S_(x + w), S_(y + h), S_(r), S_(r));
     SelectObject(dc, ob);
     SelectObject(dc, op);
     DeleteObject(b);
@@ -421,7 +501,7 @@ static void ring(HDC dc, int cx, int cy, int r, int k, DWORD color)
 {
     HANDLE p = CreatePen(0, k, color);
     HANDLE ob = SelectObject(dc, GetStockObject(NULL_BRUSH)), op = SelectObject(dc, p);
-    RoundRect(dc, cx - r, cy - r, cx + r, cy + r, 2 * r, 2 * r);
+    smooth_round_rect(dc, cx - r, cy - r, cx + r, cy + r, 2 * r, 2 * r);
     SelectObject(dc, ob);
     SelectObject(dc, op);
     DeleteObject(p);
@@ -712,7 +792,7 @@ static void draw_tab(DrawItem *d)
         HBRUSH b = CreateSolidBrush(T.navsel);
         HANDLE p = CreatePen(0, 1, T.dark ? T.navsel : T.border);
         HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
-        RoundRect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, S_(10), S_(10));
+        smooth_round_rect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, S_(10), S_(10));
         SelectObject(d->dc, ob);
         SelectObject(d->dc, op);
         DeleteObject(b);
@@ -739,7 +819,7 @@ static void draw_tab(DrawItem *d)
         HANDLE p = CreatePen(0, 1, c);
         HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
         int r = S_(8), x = d->rc.right - S_(20), y = (d->rc.top + d->rc.bottom - r) / 2;
-        RoundRect(d->dc, x, y, x + r, y + r, r, r);
+        smooth_round_rect(d->dc, x, y, x + r, y + r, r, r);
         SelectObject(d->dc, ob);
         SelectObject(d->dc, op);
         DeleteObject(b);
@@ -757,7 +837,7 @@ static void draw_segment(DrawItem *d)
     HBRUSH b = CreateSolidBrush(T.dark ? T.side : T.btn_down);
     HANDLE p = CreatePen(0, 1, T.border);
     HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
-    RoundRect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, S_(14), S_(14));
+    smooth_round_rect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, S_(14), S_(14));
     SelectObject(d->dc, ob);
     SelectObject(d->dc, op);
     DeleteObject(b);
@@ -769,7 +849,7 @@ static void draw_segment(DrawItem *d)
     p = CreatePen(0, S_(1) + (off ? 0 : 1), edge);
     ob = SelectObject(d->dc, b);
     op = SelectObject(d->dc, p);
-    RoundRect(d->dc, half.left, half.top, half.right, half.bottom, S_(12), S_(12));
+    smooth_round_rect(d->dc, half.left, half.top, half.right, half.bottom, S_(12), S_(12));
     SelectObject(d->dc, ob);
     SelectObject(d->dc, op);
     DeleteObject(b);
@@ -778,7 +858,7 @@ static void draw_segment(DrawItem *d)
         HANDLE fp = CreatePen(0, 1, T.dim);
         ob = SelectObject(d->dc, GetStockObject(NULL_BRUSH));
         op = SelectObject(d->dc, fp);
-        RoundRect(d->dc, half.left + k, half.top + k, half.right - k, half.bottom - k, S_(9), S_(9));
+        smooth_round_rect(d->dc, half.left + k, half.top + k, half.right - k, half.bottom - k, S_(9), S_(9));
         SelectObject(d->dc, ob);
         SelectObject(d->dc, op);
         DeleteObject(fp);
@@ -813,7 +893,7 @@ static void draw_switch(DrawItem *d)
     HBRUSH b = CreateSolidBrush(fill);
     HANDLE p = CreatePen(0, 1, focus && !off ? T.text : edge);
     HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
-    RoundRect(d->dc, x, y, x + w, y + h, h, h);
+    smooth_round_rect(d->dc, x, y, x + w, y + h, h, h);
     SelectObject(d->dc, ob);
     SelectObject(d->dc, op);
     DeleteObject(b);
@@ -824,7 +904,7 @@ static void draw_switch(DrawItem *d)
     p = CreatePen(0, 1, kc);
     ob = SelectObject(d->dc, b);
     op = SelectObject(d->dc, p);
-    RoundRect(d->dc, kx, ky, kx + k, ky + k, k, k);
+    smooth_round_rect(d->dc, kx, ky, kx + k, ky + k, k, k);
     SelectObject(d->dc, ob);
     SelectObject(d->dc, op);
     DeleteObject(b);
@@ -858,13 +938,13 @@ static void draw_button(DrawItem *d)
     HANDLE p = CreatePen(0, 1, edge);
     HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
     int r = S_(10);
-    RoundRect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, r, r);
+    smooth_round_rect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, r, r);
     if (focus && !off) { /* keyboard focus ring */
         HANDLE fp = CreatePen(0, 1, primary ? T.sel_text : T.dim);
         SelectObject(d->dc, fp);
         SelectObject(d->dc, GetStockObject(NULL_BRUSH));
         int k = S_(3);
-        RoundRect(d->dc, d->rc.left + k, d->rc.top + k, d->rc.right - k, d->rc.bottom - k, r, r);
+        smooth_round_rect(d->dc, d->rc.left + k, d->rc.top + k, d->rc.right - k, d->rc.bottom - k, r, r);
         SelectObject(d->dc, p);
         DeleteObject(fp);
     }

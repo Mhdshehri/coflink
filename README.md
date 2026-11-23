@@ -13,6 +13,10 @@ No VPN. No port forwarding. No IP addresses.
 
 CoFLink carries Cry of Fear's LAN co-op through Steam's relay network, so you can play with Steam friends without Hamachi or Radmin. You don't install anything, and it doesn't need admin rights.
 
+<p align="center">
+  <img src="docs/images/play.png" width="560" alt="CoFLink's Play page">
+</p>
+
 ## How to play
 
 Both players unzip the [latest release](../../releases/latest) and open **CoFLink.exe**. Steam must be running, and the host must be your Steam friend. Up to 4 players.
@@ -28,6 +32,11 @@ Both players unzip the [latest release](../../releases/latest) and open **CoFLin
 3. In the main menu press `~`, then `Ctrl+V` and `Enter`. The connect command is already copied.
 
 The **Settings** page picks fullscreen, windowed or borderless, the resolution, a sharp picture on zoomed (high-DPI) screens, and no mouse acceleration. **How to** in CoFLink walks you through each step. The full guide is [in the zip](package/README.txt).
+
+<p align="center">
+  <img src="docs/images/settings.png" width="380" alt="Settings page">
+  <img src="docs/images/play-light.png" width="380" alt="Play page in the light theme">
+</p>
 
 ## Safety
 

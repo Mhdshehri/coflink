@@ -32,7 +32,9 @@ mkdef user32 OpenClipboard@4 EmptyClipboard@0 SetClipboardData@8 CloseClipboard@
     CreatePopupMenu@0 AppendMenuW@16 TrackPopupMenu@28 DestroyMenu@4 EnumDisplaySettingsW@12 \
     LoadImageW@24 DrawIconEx@36
 mkdef gdi32 CreateFontW@56 GetDeviceCaps@8 CreateSolidBrush@4 CreatePen@12 SelectObject@8 DeleteObject@4 \
-    GetStockObject@4 SetTextColor@8 SetBkColor@8 SetBkMode@8 RoundRect@28
+    GetStockObject@4 SetTextColor@8 SetBkColor@8 SetBkMode@8 RoundRect@28 \
+    CreateCompatibleDC@4 CreateCompatibleBitmap@12 DeleteDC@4 StretchBlt@44 SetStretchBltMode@8 \
+    SetBrushOrgEx@16 GetCurrentObject@8 GetObjectW@12
 mkdef comctl32 InitCommonControls@0
 mkdef shell32 ShellExecuteA@24
 mkdef ws2_32 WSAStartup@8 socket@12 bind@12 connect@12 send@16 recv@16 sendto@24 recvfrom@24 \

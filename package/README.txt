@@ -1,4 +1,4 @@
-CoFLink 1.3 - Cry of Fear co-op with a Steam friend
+CoFLink 1.3.1 - Cry of Fear co-op with a Steam friend
 =====================================================
 No VPN (no Hamachi/Radmin), no port forwarding, no IP addresses.
 One program for both players: open CoFLink.exe and click a button.
@@ -11,7 +11,7 @@ Both of you need: Windows, Steam running and logged in, Cry of Fear
 installed from Steam, and this whole folder (unzip it anywhere, e.g. Desktop).
 Keep CoFLink.exe and steam_api.dll together in the same folder.
 You must be Steam friends with the host. Up to 4 players (host + 3).
-Use the same CoFLink version, the latest (1.3).
+Use the same CoFLink version, the latest (1.3.1).
 
 Before the first game, both of you: in Steam, right-click Cry of Fear ->
 Properties -> Installed Files -> "Verify integrity of game files".

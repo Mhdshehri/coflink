@@ -15,7 +15,7 @@
 #include "ui.h"
 
 #ifndef VERSION /* the tests build a second copy with a different version */
-#define VERSION "1.3"
+#define VERSION "1.3.1"
 #endif
 #define PROTO "2"     /* relay protocol; both players need the same */
 #define COF_APPID 223710
